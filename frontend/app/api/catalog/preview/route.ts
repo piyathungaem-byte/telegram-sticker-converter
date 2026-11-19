@@ -9,6 +9,52 @@ import { NextRequest, NextResponse } from 'next/server';
 
 const FULLYST_BASE = 'https://fullyst.com';
 const FULLYST_STICKER_HOST = 'stickers.fullyst.com';
+const MAX_ASSET_BYTES = 8 * 1024 * 1024; // 8 MB — mirrors the Python backend cap
+const FETCH_TIMEOUT_MS = 15_000;
+
+/** Fetch with an abort timeout; rejects if the body exceeds maxBytes while streaming. */
+async function fetchCapped(
+  url: string,
+  init: RequestInit,
+  maxBytes: number
+): Promise<{ ok: boolean; status: number; contentType: string; bytes: ArrayBuffer } | { error: string; status: number }> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal });
+    const contentLength = Number(res.headers.get('content-length') || '0');
+    if (contentLength && contentLength > maxBytes) {
+      return { error: 'Asset exceeds size cap', status: 502 };
+    }
+    if (!res.body) {
+      const buf = await res.arrayBuffer();
+      if (buf.byteLength > maxBytes) return { error: 'Asset exceeds size cap', status: 502 };
+      return { ok: res.ok, status: res.status, contentType: res.headers.get('content-type') || '', bytes: buf };
+    }
+    const reader = res.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel();
+        return { error: 'Asset exceeds size cap', status: 502 };
+      }
+      chunks.push(value);
+    }
+    const merged = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      merged.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return { ok: res.ok, status: res.status, contentType: res.headers.get('content-type') || '', bytes: merged.buffer };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export async function GET(req: NextRequest) {
   const slug = (req.nextUrl.searchParams.get('slug') || '').trim();
@@ -30,6 +76,7 @@ export async function GET(req: NextRequest) {
       },
       body: body.toString(),
       next: { revalidate: 300 },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!receiverRes.ok) {
@@ -60,19 +107,25 @@ export async function GET(req: NextRequest) {
     const ext = isVideo ? 'webm' : 'webp';
     const assetUrl = `https://${FULLYST_STICKER_HOST}/${packUuid}/full/${fileUid}.${ext}`;
 
-    const assetRes = await fetch(assetUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 StickerStudio/1.0', Accept: 'image/webp,video/webm,*/*' },
-      cache: 'no-store',
-    });
+    const capped = await fetchCapped(
+      assetUrl,
+      {
+        headers: { 'User-Agent': 'Mozilla/5.0 StickerStudio/1.0', Accept: 'image/webp,video/webm,*/*' },
+        cache: 'no-store',
+      },
+      MAX_ASSET_BYTES
+    );
 
-    if (!assetRes.ok) {
-      return NextResponse.json({ error: `Asset fetch failed HTTP ${assetRes.status}` }, { status: 502 });
+    if ('error' in capped) {
+      return NextResponse.json({ error: capped.error }, { status: capped.status });
+    }
+    if (!capped.ok) {
+      return NextResponse.json({ error: `Asset fetch failed HTTP ${capped.status}` }, { status: 502 });
     }
 
-    const contentType = assetRes.headers.get('content-type') || (isVideo ? 'video/webm' : 'image/webp');
-    const blob = await assetRes.arrayBuffer();
+    const contentType = capped.contentType || (isVideo ? 'video/webm' : 'image/webp');
 
-    return new NextResponse(blob, {
+    return new NextResponse(capped.bytes, {
       headers: {
         'Content-Type': contentType,
         'Cache-Control': 'public, max-age=3600, s-maxage=3600',

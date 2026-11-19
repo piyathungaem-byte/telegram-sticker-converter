@@ -16,6 +16,10 @@ interface StickerGridProps {
   converting: boolean;
   /** Feature 2: Badge indicating the import source (e.g. 'Fullyst') */
   source?: string;
+  /** N stickers that failed to download (Fullyst imports) */
+  failedCount?: number;
+  /** Re-import the pack to retry failed stickers (Fullyst only) */
+  onRetryFailed?: () => void;
   /** Feature 3: When true, shows an adult-content warning badge */
   isAdult?: boolean;
   /** Whether 18+ content should be shown unblurred */
@@ -38,6 +42,8 @@ export function StickerGrid({
   onSaveFavorite,
   converting,
   source,
+  failedCount = 0,
+  onRetryFailed,
   isAdult = false,
   showAdultPreviews = false,
   onToggleAdultPreviews,
@@ -48,27 +54,79 @@ export function StickerGrid({
   const [lastClickedIndex, setLastClickedIndex] = useState<number | null>(null);
   const [filter, setFilter] = useState<'all' | 'animated' | 'static'>('all');
   const [savedIndices, setSavedIndices] = useState<Set<number>>(new Set());
+  const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
 
   // CRITICAL FIX FOR "hover auto select stickers":
   // Only select all stickers when a NEW jobId is loaded, NOT on every 700ms polling tick!
-  const lastJobIdRef = useRef<string | null>(null);
+  // Initialise the selection to "all stickers" once per jobId, when stickers
+  // are available (jobId is set at fetch start, stickers arrive later).
+  const selectionInitializedForRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!jobId) return;
-    if (jobId !== lastJobIdRef.current) {
-      lastJobIdRef.current = jobId;
-      setSelectedIndices(new Set(stickers.map((s) => s.index)));
-    } else if (stickers.length > 0 && selectedIndices.size === 0 && lastJobIdRef.current === null) {
-      lastJobIdRef.current = jobId;
-      setSelectedIndices(new Set(stickers.map((s) => s.index)));
-    }
+    if (!jobId || stickers.length === 0) return;
+    if (selectionInitializedForRef.current === jobId) return;
+    selectionInitializedForRef.current = jobId;
+    setSelectedIndices(new Set(stickers.map((s) => s.index)));
+    setFocusedIndex(stickers[0]?.index ?? null);
   }, [jobId, stickers]);
+
+  // (Arrow-key navigation helpers are defined after `filtered` below.)
+
+  useEffect(() => {
+    if (focusedIndex === null) return;
+    const el = gridRef.current?.querySelector<HTMLElement>(`[data-sticker-index="${focusedIndex}"]`);
+    el?.focus();
+    // Only on focus index change, not on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusedIndex]);
 
   const filtered = stickers.filter((s) => {
     if (filter === 'animated') return s.kind === 'Animated';
     if (filter === 'static') return s.kind === 'Static';
     return true;
   });
+
+  // Arrow keys move a roving focus across the grid, Space toggles selection
+  // (same navigation model as webapp.py: arrows move, Space selects).
+  const filteredIndexes = filtered.map((s) => s.index);
+
+  const estimateColumns = () => {
+    if (typeof window === 'undefined') return 8;
+    const w = window.innerWidth;
+    if (w >= 1024) return 8;
+    if (w >= 768) return 6;
+    if (w >= 640) return 4;
+    return 2;
+  };
+
+  const handleGridKeyDown = (e: React.KeyboardEvent) => {
+    if (filteredIndexes.length === 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button, input, a, select, textarea')) return;
+
+    const current = focusedIndex ?? filteredIndexes[0];
+    const pos = Math.max(0, filteredIndexes.indexOf(current));
+    const cols = estimateColumns();
+    let nextPos: number | null = null;
+    switch (e.key) {
+      case 'ArrowRight': nextPos = Math.min(pos + 1, filteredIndexes.length - 1); break;
+      case 'ArrowLeft': nextPos = Math.max(pos - 1, 0); break;
+      case 'ArrowDown': nextPos = Math.min(pos + cols, filteredIndexes.length - 1); break;
+      case 'ArrowUp': nextPos = Math.max(pos - cols, 0); break;
+      case 'Home': nextPos = 0; break;
+      case 'End': nextPos = filteredIndexes.length - 1; break;
+      case ' ':
+      case 'Enter': {
+        e.preventDefault();
+        toggleSelect(current, e.shiftKey);
+        return;
+      }
+      default: return;
+    }
+    e.preventDefault();
+    setFocusedIndex(filteredIndexes[nextPos]);
+  };
 
   const toggleSelect = useCallback(
     (index: number, shiftKey: boolean = false) => {
@@ -180,7 +238,18 @@ export function StickerGrid({
 
       {/* Toolbar */}
       <div className="p-2.5 sm:p-3 rounded-xl bg-[#101618] border border-line flex items-center justify-between flex-wrap gap-2.5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {source === 'Fullyst' && onRetryFailed && failedCount > 0 && (
+            <button
+              type="button"
+              onClick={onRetryFailed}
+              disabled={converting}
+              className="px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/40 text-amber-300 text-xs font-bold transition disabled:opacity-40"
+              title="Re-import this pack to retry the failed stickers"
+            >
+              Retry {failedCount} skipped
+            </button>
+          )}
           <button
             type="button"
             onClick={handleSelectAll}
@@ -247,8 +316,14 @@ export function StickerGrid({
       </div>
 
       {/* Grid */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 sm:gap-3">
-        {filtered.map((sticker) => {
+      <div
+        className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 sm:gap-3"
+        role="group"
+        aria-label="Sticker picker. Use arrow keys to move, Space to select, Shift-click for a range."
+        ref={gridRef}
+        onKeyDown={handleGridKeyDown}
+      >
+        {filtered.map((sticker, cardPosition) => {
           const isSelected = selectedIndices.has(sticker.index);
           const isAnimated = sticker.kind === 'Animated';
           const thumbUrl = api.getThumbUrl(jobId, sticker.index);
@@ -257,17 +332,24 @@ export function StickerGrid({
           const initialSrc = isAnimated ? previewUrl : thumbUrl;
           const shouldBlur = Boolean(sticker.isAdult || isAdult) && !showAdultPreviews;
           const isSaved = savedIndices.has(sticker.index);
+          const isFocused = focusedIndex === sticker.index || (focusedIndex === null && cardPosition === 0);
 
           return (
             <div
               key={sticker.index}
+              data-sticker-index={sticker.index}
+              tabIndex={isFocused ? 0 : -1}
+              onFocus={() => setFocusedIndex(sticker.index)}
+              role="checkbox"
+              aria-checked={isSelected}
+              aria-label={`Sticker ${sticker.sourceIndex}, ${sticker.kind}${isSelected ? ', selected' : ''}`}
               onClick={(e) => {
                 // Ignore clicks originating from inside buttons
                 const target = e.target as HTMLElement;
                 if (target.closest('button')) return;
                 toggleSelect(sticker.index, e.shiftKey);
               }}
-              className={`relative p-2 rounded-xl border flex flex-col items-center gap-1.5 cursor-pointer transition select-none group ${
+              className={`relative p-2 rounded-xl border flex flex-col items-center gap-1.5 cursor-pointer transition select-none group focus:outline-none focus:ring-2 focus:ring-mint ${
                 isSelected
                   ? 'bg-mint/10 border-mint shadow-[0_0_0_1px_#38d69d]'
                   : 'bg-[#101618] border-line hover:border-line-strong hover:bg-panel-elevated'
@@ -378,7 +460,7 @@ export function StickerGrid({
               {selectedIndices.size} sticker{selectedIndices.size === 1 ? '' : 's'} selected
             </span>
             <p className="text-[11px] text-muted">
-              WhatsApp requires ≥3 Animated OR ≥3 Static per pack.
+              {selectedAnimated} animated · {selectedStatic} static — WhatsApp needs ≥3 of one type per pack.
             </p>
           </div>
 

@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Globe, Eye, ChevronLeft, ChevronRight, Loader2, ShieldAlert } from 'lucide-react';
+import { Search, Globe, Eye, ChevronLeft, ChevronRight, Loader2, ShieldAlert, Undo2 } from 'lucide-react';
 import { FullystPack } from '../lib/types';
-import { api } from '../lib/api';
+import { api, apiFetch } from '../lib/api';
 
 interface FullystExplorerProps {
   onImportPack: (slug: string, title?: string, isAdult?: boolean) => void;
@@ -26,14 +26,18 @@ export function FullystExplorer({
   const [loading, setLoading] = useState(false);
   const [packs, setPacks] = useState<FullystPack[]>([]);
   const [totalPages, setTotalPages] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
   const [visitedPages, setVisitedPages] = useState<Set<number>>(new Set());
+  const [visitCount, setVisitCount] = useState(0);
+  const [visitNote, setVisitNote] = useState('');
+  const [statusLine, setStatusLine] = useState('Loading catalog…');
 
   // Stable ref so fetchCatalog always reads the latest query value
   const queryRef = useRef(query);
   useEffect(() => {
     queryRef.current = query;
   }, [query]);
+
+  const searchActive = query.trim().length > 0;
 
   const handleJump = (e: React.FormEvent) => {
     e.preventDefault();
@@ -47,21 +51,40 @@ export function FullystExplorer({
   const fetchCatalog = useCallback(
     async (p = 1, q?: string) => {
       const searchQuery = q !== undefined ? q : queryRef.current;
+      // webapp.py semantics: only unfiltered catalog views are counted as
+      // "visited pages" — search result pages are not recorded.
+      const markVisited = searchQuery.trim() === '';
+
       setLoading(true);
+      setStatusLine('Loading catalog…');
       try {
         const data = await api.searchCatalog(searchQuery, p);
         setPacks(data.packs || []);
         setPage(data.page || 1);
         setTotalPages(data.pageCount || 1);
-        setHasMore(data.hasMore || false);
 
-        try {
-          await api.markFullystPageVisited(p);
-        } catch {
-          // ignore
+        const trimmed = searchQuery.trim();
+        setStatusLine(
+          trimmed
+            ? `“${trimmed}” — ${data.packs?.length ?? 0} pack(s) on page ${data.page || 1} of ${data.pageCount || 1}`
+            : `Catalog · page ${data.page || 1} of ${data.pageCount || 1}`
+        );
+
+        if (markVisited) {
+          try {
+            const res = await api.markFullystPageVisited(p);
+            if (res && typeof res === 'object') {
+              if (res.alreadyVisited) setVisitNote(`Page ${p} is in your visit history.`);
+              else setVisitNote('');
+              if (typeof res.count === 'number') setVisitCount(res.count);
+            }
+            setVisitedPages((prev) => new Set(prev).add(p));
+          } catch {
+            // Catalog works without Modal; visit tracking is best-effort.
+          }
         }
-        setVisitedPages((prev) => new Set(prev).add(p));
       } catch (err: any) {
+        setStatusLine('Could not load the catalog.');
         onToast(err.message, 'error');
       } finally {
         setLoading(false);
@@ -74,13 +97,13 @@ export function FullystExplorer({
     fetchCatalog(1, '');
     (async () => {
       try {
-        const { apiFetch } = await import('../lib/api');
-        const result = await apiFetch<{ pages: number[] }>('/api/fullyst/visited-pages');
+        const result = await apiFetch<{ pages: number[]; count?: number }>('/api/fullyst/visited-pages');
         if (Array.isArray(result?.pages)) {
           setVisitedPages(new Set(result.pages));
+          setVisitCount(typeof result.count === 'number' ? result.count : result.pages.length);
         }
       } catch {
-        // ignore
+        // Catalog works without Modal; visit history is best-effort.
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -91,10 +114,14 @@ export function FullystExplorer({
     fetchCatalog(1, query);
   };
 
-  // Filter packs based on Hide Adult Content setting (from webapp.py:714)
-  const visiblePacks = hideAdultContent
-    ? packs.filter((p) => !p.isAdult)
-    : packs;
+  const handleBackToCatalog = () => {
+    setQuery('');
+    fetchCatalog(1, '');
+  };
+
+  // Filter packs based on Hide Adult Content setting
+  const visiblePacks = hideAdultContent ? packs.filter((p) => !p.isAdult) : packs;
+  const hiddenByFilter = packs.length - visiblePacks.length;
 
   return (
     <div className="space-y-5">
@@ -130,7 +157,7 @@ export function FullystExplorer({
         </div>
 
         {/* Search input */}
-        <form onSubmit={handleSearch} className="flex items-center gap-2 w-full sm:w-auto">
+        <form onSubmit={handleSearch} className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
           <div className="relative flex-1 sm:w-64">
             <Search className="w-4 h-4 text-muted absolute left-3 top-2.5" />
             <input
@@ -138,6 +165,7 @@ export function FullystExplorer({
               placeholder="Search packs, e.g. cat, pepe, anime…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              maxLength={100}
               className="w-full bg-[#101618] border border-line rounded-xl pl-9 pr-3 py-2 text-xs text-white placeholder-dim outline-none focus:border-mint"
             />
           </div>
@@ -148,7 +176,28 @@ export function FullystExplorer({
           >
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Search'}
           </button>
+          {searchActive && (
+            <button
+              type="button"
+              onClick={handleBackToCatalog}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-panel-elevated hover:bg-[#253437] border border-line text-xs font-semibold text-white transition disabled:opacity-50"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+              <span>Back to catalog</span>
+            </button>
+          )}
         </form>
+      </div>
+
+      {/* Status line + visit history */}
+      <div className="flex items-center justify-between flex-wrap gap-2 -mt-1">
+        <p className="text-[11.5px] text-muted min-h-[18px]">{statusLine}</p>
+        {(visitCount > 0 || visitNote) && (
+          <p className={`text-[11px] min-h-[18px] ${visitNote ? 'text-warn' : 'text-dim'}`} role="status" aria-live="polite">
+            {visitNote || `Pages visited: ${visitCount}`}
+          </p>
+        )}
       </div>
 
       {/* Grid of Packs */}
@@ -170,9 +219,15 @@ export function FullystExplorer({
         </div>
       ) : visiblePacks.length === 0 ? (
         <div className="py-16 text-center border border-dashed border-line rounded-xl text-muted text-xs">
-          {hideAdultContent && packs.length > 0
-            ? 'All matching packs on this page were hidden by your "Hide adult content" setting.'
-            : 'No sticker packs found. Try searching for something else!'}
+          {packs.length > 0 && hideAdultContent ? (
+            <>
+              All {hiddenByFilter} pack(s) on this page were hidden by your &quot;Hide adult content&quot; setting.
+              <br />
+              <span className="text-warn">Use the pager below to keep browsing.</span>
+            </>
+          ) : (
+            'No sticker packs found. Try searching for something else!'
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
@@ -194,8 +249,9 @@ export function FullystExplorer({
         </div>
       )}
 
-      {/* Pagination */}
-      {!loading && visiblePacks.length > 0 && (
+      {/* Pagination — always available when the catalog has multiple pages,
+          even if this page is fully hidden by the adult filter */}
+      {!loading && totalPages > 1 && (
         <div className="flex items-center justify-between flex-wrap gap-3 pt-3 border-t border-line/40">
           <div className="flex items-center gap-2">
             <button
@@ -208,7 +264,7 @@ export function FullystExplorer({
             </button>
             <span className="text-xs text-muted">
               Page {page}
-              {visitedPages.has(page) && (
+              {visitedPages.has(page) && !searchActive && (
                 <span className="text-mint ml-1 font-bold" title="Page visited">
                   ✓
                 </span>
@@ -218,7 +274,7 @@ export function FullystExplorer({
             <button
               type="button"
               onClick={() => fetchCatalog(page + 1)}
-              disabled={!hasMore}
+              disabled={page >= totalPages}
               className="p-1.5 rounded-lg bg-panel border border-line hover:border-line-strong text-muted hover:text-white disabled:opacity-30"
             >
               <ChevronRight className="w-4 h-4" />
@@ -254,9 +310,8 @@ export function FullystExplorer({
 }
 
 /**
- * Individual pack card matching webapp.py:716-734:
- * Tries animated GIF preview from Modal backend for animated packs;
- * falls back to static catalog preview route or sampleUrl.
+ * Individual pack card: animated GIF preview from Modal backend (when deployed),
+ * falling back to the static Vercel proxy preview, then the raw sample URL.
  */
 function PackCard({
   pack,
@@ -273,9 +328,7 @@ function PackCard({
 }) {
   const isAnimatedPack =
     pack.isAnimated === true || /animated|video/i.test(String(pack.kind || ''));
-  const animatedUrl = isAnimatedPack
-    ? api.getFullystAnimatedPreviewUrl(pack.slug)
-    : '';
+  const animatedUrl = isAnimatedPack ? api.getFullystAnimatedPreviewUrl(pack.slug) : '';
   const staticUrl = api.getCatalogPreviewUrl(pack.slug);
 
   const [currentSrc, setCurrentSrc] = useState(animatedUrl || staticUrl);
@@ -286,7 +339,9 @@ function PackCard({
     setCurrentSrc(animatedUrl || staticUrl);
     setFallbackAttempted(false);
     setAllFailed(false);
-  }, [pack.slug, animatedUrl, staticUrl]);
+    // animatedUrl/staticUrl are derived from slug
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pack.slug]);
 
   const handleError = () => {
     // If animated URL failed, fall back to static WebP proxy

@@ -25,12 +25,13 @@ export function CollectionModal({
   onToast,
 }: CollectionModalProps) {
   const [activeGroup, setActiveGroup] = useState<string>('all');
+  const [savedFilter, setSavedFilter] = useState<'all' | 'static' | 'animated'>('all');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [packTitle, setPackTitle] = useState('My Favorites Mix');
   const [newGroupName, setNewGroupName] = useState('');
-  // Feature 1 — Undo Delete: stores { message, undoToken } when a remove succeeds
-  const [undoBanner, setUndoBanner] = useState<{ undoToken: string } | null>(null);
-  // Feature 2 — Move to Group: tracks which group the user wants to move selected stickers into
+  // Undo Delete/Move: stores { message, undoToken } when remove/move succeeds
+  const [undoBanner, setUndoBanner] = useState<{ message: string; undoToken: string } | null>(null);
+  // Move to Group: tracks which group the user wants to move selected stickers into
   const [moveTargetGroupId, setMoveTargetGroupId] = useState<string>('');
   // Brief inline success message shown after a successful move
   const [moveSuccessMsg, setMoveSuccessMsg] = useState<string>('');
@@ -40,6 +41,7 @@ export function CollectionModal({
     if (isOpen) {
       setSelectedIds(new Set());
       setActiveGroup('all');
+      setSavedFilter('all');
       setUndoBanner(null);
       setMoveSuccessMsg('');
       document.body.style.overflow = 'hidden';
@@ -52,9 +54,21 @@ export function CollectionModal({
   if (!isOpen) return null;
 
   const filtered = items.filter((item) => {
-    if (activeGroup === 'all') return true;
-    return (item.groupId || 'ungrouped') === activeGroup;
+    if (activeGroup !== 'all' && (item.groupId || 'ungrouped') !== activeGroup) return false;
+    if (savedFilter === 'animated') return item.kind === 'Animated';
+    if (savedFilter === 'static') return item.kind !== 'Animated';
+    return true;
   });
+
+  const staticCount = items.filter((i) => i.kind !== 'Animated').length;
+  const animatedCount = items.length - staticCount;
+
+  // Type-aware selection stats — WhatsApp cannot mix types in one pack
+  const selectedItems = items.filter((i) => selectedIds.has(i.id));
+  const selectedAnimated = selectedItems.filter((i) => i.kind === 'Animated').length;
+  const selectedStatic = selectedItems.length - selectedAnimated;
+  const hasMixedSelection = selectedAnimated > 0 && selectedStatic > 0;
+  const canCreatePack = Math.max(selectedAnimated, selectedStatic) >= 3;
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -85,9 +99,9 @@ export function CollectionModal({
         next.delete(id);
         return next;
       });
-      // Feature 1 — Undo Delete: show inline banner with undo token from backend
+      // Undo Delete: show inline banner with undo token from backend
       if (result?.undoToken) {
-        setUndoBanner({ undoToken: result.undoToken });
+        setUndoBanner({ undoToken: result.undoToken, message: 'Sticker removed.' });
       } else {
         onToast('Sticker removed from favorites.', 'info');
       }
@@ -97,28 +111,32 @@ export function CollectionModal({
     }
   };
 
-  // Feature 1 — Undo Delete: call backend undo endpoint, then refresh
+  // Undo: call backend undo endpoint, then refresh
   const handleUndo = async () => {
     if (!undoBanner) return;
     try {
       await api.undoCollectionAction(undoBanner.undoToken);
       setUndoBanner(null);
-      onToast('Remove undone!', 'success');
+      onToast('Undone!', 'success');
       onRefresh();
     } catch (err: any) {
       onToast(err.message, 'error');
     }
   };
 
-  // Feature 2 — Move Stickers to Group
+  // Move Stickers to Group
   const handleMoveToGroup = async () => {
     if (selectedIds.size === 0 || !moveTargetGroupId) return;
     try {
-      await api.moveCollectionStickers(Array.from(selectedIds), moveTargetGroupId);
+      const result = await api.moveCollectionStickers(Array.from(selectedIds), moveTargetGroupId);
       const targetGroup = groups.find((g) => g.id === moveTargetGroupId);
       setSelectedIds(new Set());
       setMoveSuccessMsg(`Moved to "${targetGroup?.name ?? 'group'}" ✓`);
       setTimeout(() => setMoveSuccessMsg(''), 3000);
+      // Backend records the move as undoable — offer the same undo banner as deletes
+      if (result?.undoToken) {
+        setUndoBanner({ undoToken: result.undoToken, message: 'Stickers moved.' });
+      }
       onRefresh();
     } catch (err: any) {
       onToast(err.message, 'error');
@@ -138,7 +156,7 @@ export function CollectionModal({
   };
 
   const handleCreatePack = () => {
-    if (selectedIds.size < 3) return;
+    if (selectedIds.size < 3 || hasMixedSelection || !canCreatePack) return;
     onConvert(Array.from(selectedIds), packTitle.trim() || 'My Favorites Mix');
     onClose();
   };
@@ -216,25 +234,28 @@ export function CollectionModal({
                   >
                     {g.name} ({count})
                   </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleDeleteGroup(g.id);
-                    }}
-                    title={`Delete group "${g.name}"`}
-                    className="pr-2 py-1 hover:text-bad"
-                  >
-                    ×
-                  </button>
+                  {g.id !== 'ungrouped' && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteGroup(g.id);
+                      }}
+                      title={`Delete group "${g.name}"`}
+                      className="pr-2 py-1 hover:text-bad"
+                      aria-label={`Delete group "${g.name}"`}
+                    >
+                      ×
+                    </button>
+                  )}
                 </span>
               );
             })}
           </div>
 
-          {/* Feature 1 — Undo Delete: inline dismissible banner */}
+          {/* Undo: inline dismissible banner (deletes and moves) */}
           {undoBanner && (
             <div className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-[#1a2a24] border border-mint/40 text-xs text-mint">
-              <span>Sticker removed.</span>
+              <span>{undoBanner.message}</span>
               <div className="flex items-center gap-2">
                 <button
                   onClick={handleUndo}
@@ -253,10 +274,36 @@ export function CollectionModal({
             </div>
           )}
 
+          {/* Type filter tabs — WhatsApp packs can't mix types */}
+          <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filter saved stickers by type">
+            {(
+              [
+                { id: 'all', label: 'All', count: items.length },
+                { id: 'static', label: 'Static', count: staticCount },
+                { id: 'animated', label: 'Animated', count: animatedCount },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setSavedFilter(tab.id)}
+                aria-pressed={savedFilter === tab.id}
+                className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${
+                  savedFilter === tab.id
+                    ? 'bg-mint/20 border-mint text-mint'
+                    : 'bg-panel-elevated border-line text-muted hover:text-white'
+                }`}
+              >
+                {tab.label} ({tab.count})
+              </button>
+            ))}
+          </div>
+
           {/* Stickers Grid */}
           {filtered.length === 0 ? (
             <div className="p-12 text-center border border-dashed border-line rounded-xl text-muted text-xs">
-              No stickers in this group yet. Click &quot;Save to My Favorites&quot; on any sticker preview to save them here.
+              {savedFilter === 'all' && activeGroup === 'all'
+                ? 'No stickers saved yet. Click "Save to My Favorites" on any sticker preview to save them here.'
+                : `No ${savedFilter === 'all' ? '' : savedFilter + ' '}stickers match this filter yet.`}
             </div>
           ) : (
             <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-3 max-h-72 overflow-y-auto pr-1">
@@ -340,13 +387,34 @@ export function CollectionModal({
 
             <button
               onClick={handleCreatePack}
-              disabled={selectedIds.size < 3}
+              disabled={selectedIds.size < 3 || !canCreatePack || hasMixedSelection}
+              title={
+                hasMixedSelection
+                  ? 'WhatsApp cannot mix static and animated stickers in one pack. Pick only one type.'
+                  : !canCreatePack
+                    ? `Need at least 3 ${selectedAnimated > 0 ? 'animated' : 'static'} stickers.`
+                    : 'Build a WhatsApp pack from the selected favorites'
+              }
               className="inline-flex items-center gap-2 px-5 py-2 rounded-xl bg-mint hover:bg-mint-hover text-black font-bold text-xs disabled:opacity-40 transition"
             >
               <CheckCircle2 className="w-4 h-4" />
               <span>Create Pack from Selected ({selectedIds.size})</span>
             </button>
           </div>
+
+          {/* Type-mix guard hint */}
+          {selectedIds.size >= 3 && hasMixedSelection && (
+            <p className="text-[11px] text-warn font-semibold">
+              Mixed selection — WhatsApp packs need all-static or all-animated stickers. You have {selectedStatic} static and {selectedAnimated} animated selected.
+            </p>
+          )}
+          {selectedIds.size >= 1 && !hasMixedSelection && !canCreatePack && (
+            <p className="text-[11px] text-muted">
+              {selectedAnimated > 0
+                ? `Select ${3 - selectedAnimated} more animated sticker${3 - selectedAnimated === 1 ? '' : 's'} to create a pack.`
+                : `Select ${3 - selectedStatic} more static sticker${3 - selectedStatic === 1 ? '' : 's'} to create a pack.`}
+            </p>
+          )}
         </div>
       </div>
     </div>
