@@ -59,15 +59,17 @@ export function StickerGrid({
 
   // CRITICAL FIX FOR "hover auto select stickers":
   // Only select all stickers when a NEW jobId is loaded, NOT on every 700ms polling tick!
-  // Initialise the selection to "all stickers" once per jobId, when stickers
-  // are available (jobId is set at fetch start, stickers arrive later).
+  // webapp.py starts with an empty selection and keeps it across polls.
+  // Reset once per jobId, when the first sticker payload arrives.
   const selectionInitializedForRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!jobId || stickers.length === 0) return;
+    if (!jobId) return;
     if (selectionInitializedForRef.current === jobId) return;
+    if (stickers.length === 0) return; // wait for the first sticker payload
     selectionInitializedForRef.current = jobId;
-    setSelectedIndices(new Set(stickers.map((s) => s.index)));
+    setSelectedIndices(new Set());
+    setLastClickedIndex(null);
     setFocusedIndex(stickers[0]?.index ?? null);
   }, [jobId, stickers]);
 
@@ -91,13 +93,14 @@ export function StickerGrid({
   // (same navigation model as webapp.py: arrows move, Space selects).
   const filteredIndexes = filtered.map((s) => s.index);
 
+  // Estimate rendered column count for arrow-key navigation by measuring the
+  // grid itself (fluid auto-fill tracks: minmax(104px|130px, auto-fill)).
   const estimateColumns = () => {
-    if (typeof window === 'undefined') return 8;
-    const w = window.innerWidth;
-    if (w >= 1024) return 8;
-    if (w >= 768) return 6;
-    if (w >= 640) return 4;
-    return 2;
+    const width = gridRef.current?.clientWidth
+      ?? (typeof window !== 'undefined' ? window.innerWidth : 800);
+    const min = typeof window !== 'undefined' && window.innerWidth >= 640 ? 130 : 104;
+    const gap = 12;
+    return Math.max(1, Math.floor((width + gap) / (min + gap)));
   };
 
   const handleGridKeyDown = (e: React.KeyboardEvent) => {
@@ -199,7 +202,8 @@ export function StickerGrid({
 
   return (
     <Container className={containerClass}>
-      {/* Title & Subtitle */}
+      {/* Title & Subtitle — hidden when embedded inside the pack dialog (the dialog header already shows the title/18+ controls) */}
+      {!embedded && (
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div>
           <h3 className="font-extrabold text-base text-white flex items-center gap-2 flex-wrap">
@@ -235,6 +239,7 @@ export function StickerGrid({
           </label>
         )}
       </div>
+      )}
 
       {/* Toolbar */}
       <div className="p-2.5 sm:p-3 rounded-xl bg-[#101618] border border-line flex items-center justify-between flex-wrap gap-2.5">
@@ -315,9 +320,9 @@ export function StickerGrid({
         </div>
       </div>
 
-      {/* Grid */}
+      {/* Grid — fluid auto-fill tracks like webapp.py (auto-fill, minmax), never fixed column counts */}
       <div
-        className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 sm:gap-3"
+        className="grid grid-cols-[repeat(auto-fill,minmax(104px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(130px,1fr))] gap-2.5 sm:gap-3"
         role="group"
         aria-label="Sticker picker. Use arrow keys to move, Space to select, Shift-click for a range."
         ref={gridRef}
@@ -396,8 +401,8 @@ export function StickerGrid({
                 </button>
               </div>
 
-              {/* Thumbnail with Checkerboard & Animated Preview */}
-              <div className="w-20 h-20 rounded-lg sticker-checkerboard flex items-center justify-center p-1.5 mt-5 overflow-hidden">
+              {/* Thumbnail with Checkerboard & Animated Preview — full card width, square, object-contain (matches webapp.py) */}
+              <div className="w-full aspect-square rounded-lg sticker-checkerboard flex items-center justify-center p-1.5 mt-5 overflow-hidden">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={initialSrc}
