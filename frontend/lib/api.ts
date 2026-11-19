@@ -5,6 +5,34 @@ import { CollectionGroup, CollectionItem, FullystPack, JobState } from './types'
 
 const STORAGE_KEY_API_URL = 'modal_api_url';
 const STORAGE_KEY_TOKEN = 'tg_bot_token';
+const STORAGE_KEY_CLIENT_ID = 'tsc_client_id';
+
+/**
+ * Per-browser identity. The Modal backend scopes jobs and the Fullyst
+ * visit-history per browser via this id (X-Client-Id header, or the
+ * ?client_id= query param for media URLs <img> tags can't decorate).
+ * Generated lazily and persisted in localStorage.
+ */
+export function getClientId(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    let id = window.localStorage.getItem(STORAGE_KEY_CLIENT_ID);
+    if (!id || !/^[A-Za-z0-9-]{1,64}$/.test(id)) {
+      id = (crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9-]/g, '');
+      window.localStorage.setItem(STORAGE_KEY_CLIENT_ID, id);
+    }
+    return id;
+  } catch {
+    return '';
+  }
+}
+
+/** Append the browser client id as a query param (for media <img>/<a> URLs). */
+function withClientId(url: string): string {
+  const cid = getClientId();
+  if (!cid) return url;
+  return url + (url.includes('?') ? '&' : '?') + `client_id=${encodeURIComponent(cid)}`;
+}
 export const DEFAULT_MODAL_URL = 'https://lahirulakshan129--telegram-sticker-converter-fastapi-app.us-east.modal.run';
 
 export const STORAGE_KEY_SHOW_ADULT = 'show_adult_previews';
@@ -115,8 +143,10 @@ export async function checkBackendHealth(urlToTest?: string): Promise<{
 
 export async function apiFetch<T = any>(path: string, options: RequestInit = {}): Promise<T> {
   const url = resolveUrl(path);
+  const cid = getClientId();
   const headers: Record<string, string> = {
     Accept: 'application/json',
+    ...(cid ? { 'X-Client-Id': cid } : {}),
     ...((options.headers as Record<string, string>) || {}),
   };
 
@@ -181,11 +211,11 @@ export const api = {
 
   getJob: (jobId: string) => apiFetch<JobState>(`/api/job/${encodeURIComponent(jobId)}`),
 
-  getThumbUrl: (jobId: string, index: number) => resolveUrl(`/api/job/${encodeURIComponent(jobId)}/thumb/${index}`),
-  getPreviewUrl: (jobId: string, index: number) => resolveUrl(`/api/job/${encodeURIComponent(jobId)}/preview/${index}`),
+  getThumbUrl: (jobId: string, index: number) => withClientId(resolveUrl(`/api/job/${encodeURIComponent(jobId)}/thumb/${index}`)),
+  getPreviewUrl: (jobId: string, index: number) => withClientId(resolveUrl(`/api/job/${encodeURIComponent(jobId)}/preview/${index}`)),
   getOutputUrl: (jobId: string, packIndex: number, stickerIndex: number) =>
-    resolveUrl(`/api/job/${encodeURIComponent(jobId)}/output/${packIndex}/${stickerIndex}`),
-  getDownloadUrl: (jobId: string, index: number) => resolveUrl(`/download/${encodeURIComponent(jobId)}/${index}`),
+    withClientId(resolveUrl(`/api/job/${encodeURIComponent(jobId)}/output/${packIndex}/${stickerIndex}`)),
+  getDownloadUrl: (jobId: string, index: number) => withClientId(resolveUrl(`/download/${encodeURIComponent(jobId)}/${index}`)),
 
   // ── Fullyst Catalog Explorer (served by Next.js Route Handlers on Vercel) ──
   // These do NOT go through Modal.com — they run server-side on Vercel itself.

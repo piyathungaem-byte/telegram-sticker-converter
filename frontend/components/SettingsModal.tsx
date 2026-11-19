@@ -228,7 +228,7 @@ export function SettingsModal({ isOpen, onClose, onSaved, onToast }: SettingsMod
                   {testResult.ok ? (
                     <>
                       <CheckCircle2 className="w-4 h-4 text-mint" />
-                      <span>Connected to Modal Cloud! ({testResult.latency} ms)</span>
+                      <span>Connected to Modal Cloud! ({Math.round(testResult.latency ?? 0)} ms)</span>
                     </>
                   ) : (
                     <>

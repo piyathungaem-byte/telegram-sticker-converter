@@ -37,7 +37,7 @@ if Path("/root").is_dir():
 import convert
 
 import modal
-from fastapi import FastAPI, HTTPException, Request as FastApiRequest, Response
+from fastapi import FastAPI, Header, HTTPException, Request as FastApiRequest, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 
@@ -137,8 +137,18 @@ FULLYST_PREVIEW_CACHE: dict[str, bytes] = {}
 FULLYST_PREVIEW_CACHE_MAX = 48
 JOBS: dict[str, dict] = {}
 COLLECTION_UNDO_ACTIONS: dict[str, dict] = {}
-ACTIVE_JOB_ID: str | None = None
-LATEST_JOB_ID: str | None = None
+# Per-browser job pointers: the hosted frontend generates a random client id
+# (localStorage) and sends it as the X-Client-Id header (or ?client_id= for
+# media URLs, which <img> tags cannot decorate with headers). Anonymous
+# callers share the "shared" bucket so pre-existing behaviour is preserved.
+ACTIVE_JOB_IDS: dict[str, str | None] = {}
+LATEST_JOB_IDS: dict[str, str | None] = {}
+CLIENT_ID_RE = re.compile(r"[A-Za-z0-9-]{1,64}")
+CLIENT_BUCKET_SHARED = "shared"
+# Back-stop capacity guard: never let more than this many jobs run at once,
+# regardless of how many browsers are connected (2-CPU container).
+MAX_ACTIVE_JOBS_TOTAL = 4
+FULLYST_VISITED_PAGES_DIR = DATA_DIR / "fullyst-visited-pages"
 DEMO_MODE = False
 
 
@@ -725,11 +735,16 @@ def _fullyst_search(query: str, page: int) -> dict:
             "hasMore": bool(packs) and page < page_count}
 
 
-def _read_fullyst_visited_pages() -> set[int]:
-    if not FULLYST_VISITED_PAGES_FILE.is_file():
+def _visited_pages_file(client_id: str | None) -> Path:
+    return FULLYST_VISITED_PAGES_DIR / f"{client_id}.json" if client_id else FULLYST_VISITED_PAGES_FILE
+
+
+def _read_fullyst_visited_pages(client_id: str | None = None) -> set[int]:
+    visited_file = _visited_pages_file(client_id)
+    if not visited_file.is_file():
         return set()
     try:
-        payload = json.loads(FULLYST_VISITED_PAGES_FILE.read_text(encoding="utf-8"))
+        payload = json.loads(visited_file.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError("The Fullyst page-visit history could not be read.") from exc
     pages = payload.get("pages") if isinstance(payload, dict) else None
@@ -739,26 +754,27 @@ def _read_fullyst_visited_pages() -> set[int]:
             if type(page) is int and 1 <= page <= FULLYST_MAX_CATALOG_PAGE}
 
 
-def _get_fullyst_visited_pages() -> list[int]:
+def _get_fullyst_visited_pages(client_id: str | None = None) -> list[int]:
     with FULLYST_VISITED_PAGES_LOCK:
-        return sorted(_read_fullyst_visited_pages())
+        return sorted(_read_fullyst_visited_pages(client_id))
 
 
-def _mark_fullyst_page_visited(page: int) -> dict:
+def _mark_fullyst_page_visited(page: int, client_id: str | None = None) -> dict:
     if type(page) is not int or not 1 <= page <= FULLYST_MAX_CATALOG_PAGE:
         raise ValueError("Enter a valid Fullyst catalog page number.")
+    visited_file = _visited_pages_file(client_id)
     with FULLYST_VISITED_PAGES_LOCK:
-        pages = _read_fullyst_visited_pages()
+        pages = _read_fullyst_visited_pages(client_id)
         already_visited = page in pages
         if not already_visited:
             pages.add(page)
-            DATA_DIR.mkdir(parents=True, exist_ok=True)
-            temp_path = FULLYST_VISITED_PAGES_FILE.with_name(
-                FULLYST_VISITED_PAGES_FILE.name + f".{uuid.uuid4().hex}.tmp")
+            visited_file.parent.mkdir(parents=True, exist_ok=True)
+            temp_path = visited_file.with_name(
+                visited_file.name + f".{uuid.uuid4().hex}.tmp")
             try:
                 temp_path.write_text(json.dumps({"version": 1, "pages": sorted(pages)},
                                                 separators=(",", ":")), encoding="utf-8")
-                os.replace(temp_path, FULLYST_VISITED_PAGES_FILE)
+                os.replace(temp_path, visited_file)
             except OSError as exc:
                 raise RuntimeError("Could not save Fullyst page history in this PC's data folder.") from exc
             finally:
@@ -1404,10 +1420,12 @@ def _delete_collection_group(group_id: str) -> tuple[str, int, list[dict]]:
         return group["name"], moved, groups
 
 
-def _save_collection_sticker(job_id: str, index: int) -> dict:
+def _save_collection_sticker(job_id: str, index: int, client_id: str | None = None) -> dict:
     with STATE_LOCK:
         job = JOBS.get(job_id)
-        if not job or job.get("status") != "ready":
+        if not _job_access_allowed(job, client_id):
+            raise ValueError("Fetch a sticker pack before saving stickers.")
+        if job.get("status") != "ready":
             raise ValueError("Fetch a sticker pack before saving stickers.")
         descriptor = next((item for item in job.get("sourceItems", [])
                            if item.get("index") == index), None)
@@ -1487,10 +1505,10 @@ def _remove_collection_sticker(item_id: str, *, record_undo: bool = False) -> in
         if entry is None:
             raise ValueError("That sticker is not in the collection.")
         with STATE_LOCK:
-            active = JOBS.get(ACTIVE_JOB_ID or "", {})
-            if active.get("status") in ("queued", "running") and active.get("source") == "Collection":
-                if any(d.get("collectionId") == item_id for d in active.get("sourceItems", [])):
-                    raise RuntimeError("This saved sticker is being used to create a pack. Try removing it after conversion finishes.")
+            for active in JOBS.values():
+                if active.get("status") in ("queued", "running") and active.get("source") == "Collection":
+                    if any(d.get("collectionId") == item_id for d in active.get("sourceItems", [])):
+                        raise RuntimeError("This saved sticker is being used to create a pack. Try removing it after conversion finishes.")
         updated = [item for item in entries if item.get("id") != item_id]
         if not record_undo:
             _collection_write(updated, groups)
@@ -1524,8 +1542,7 @@ def _remove_collection_sticker(item_id: str, *, record_undo: bool = False) -> in
         return len(updated), undo_token
 
 
-def _start_collection_conversion(selected_ids: list[str], title: str) -> str:
-    global ACTIVE_JOB_ID, LATEST_JOB_ID
+def _start_collection_conversion(selected_ids: list[str], title: str, client_id: str | None = None) -> str:
     if not selected_ids or len(selected_ids) > MAX_SAVED_STICKERS:
         raise ValueError("Select saved stickers first.")
     if len(set(selected_ids)) != len(selected_ids):
@@ -1558,8 +1575,10 @@ def _start_collection_conversion(selected_ids: list[str], title: str) -> str:
         if max(static_count, animated_count) < 3:
             raise ValueError("Select at least 3 saved stickers of one type to create a WhatsApp pack.")
         with STATE_LOCK:
-            if ACTIVE_JOB_ID and JOBS.get(ACTIVE_JOB_ID, {}).get("status") in ("queued", "running"):
-                raise RuntimeError("A job is already running. Wait for it to finish first.")
+            if _client_busy(client_id):
+                raise RuntimeError("A job is already running for this browser. Wait for it to finish first.")
+            if _active_job_count() >= MAX_ACTIVE_JOBS_TOTAL:
+                raise RuntimeError("The converter is busy with other packs. Please try again in a moment.")
             _trim_jobs()
             job_id = _new_job_id()
             set_name = f"saved_collection_{job_id}"
@@ -1571,16 +1590,83 @@ def _start_collection_conversion(selected_ids: list[str], title: str) -> str:
                 "message": f"Creating {len(descriptors)} saved stickers…", "done": 0,
                 "total": len(descriptors), "packs": [], "packFiles": [],
                 "previewEntries": [], "source": "Collection", "sourceSlug": "",
+                "clientId": _client_bucket(client_id),
                 "sourceItems": descriptors, "setName": set_name, "title": title,
                 "isAdult": any(item.get("isAdult") for item in selected_entries),
                 "activityLog": [], "_activitySeq": 0, "outputDir": str(job_dir),
                 "created": time.time(),
             }
             _append_activity_log(JOBS[job_id], "Queued", "Preparing your saved stickers…")
-            ACTIVE_JOB_ID = LATEST_JOB_ID = job_id
+            _set_current_job(client_id, job_id)
     threading.Thread(target=_run_conversion, args=(job_id, [item["index"] for item in descriptors], "selected"),
                      name=f"saved-sticker-convert-{job_id}", daemon=True).start()
     return job_id
+
+
+
+# ---------------------------------------------------------------------------
+# Per-browser identity helpers (X-Client-Id)
+# ---------------------------------------------------------------------------
+
+def _client_id(value):
+    """Validate a client-supplied id; returns None for missing/invalid values."""
+    if not value:
+        return None
+    value = str(value).strip()
+    return value if CLIENT_ID_RE.fullmatch(value) else None
+
+
+def _client_bucket(client_id):
+    return client_id or CLIENT_BUCKET_SHARED
+
+
+def _job_access_allowed(job, client_id):
+    """Jobs created before per-browser scoping (no clientId) stay accessible to everyone."""
+    if not job:
+        return False
+    owner = job.get("clientId")
+    if not owner:
+        return True
+    return owner == _client_bucket(client_id)
+
+
+def _require_job_access(job, client_id):
+    if not _job_access_allowed(job, client_id):
+        raise HTTPException(status_code=404, detail="This app session has expired. Fetch the pack again.")
+    return job
+
+
+def _active_job_id(client_id):
+    return ACTIVE_JOB_IDS.get(_client_bucket(client_id))
+
+
+def _latest_job_id(client_id):
+    return LATEST_JOB_IDS.get(_client_bucket(client_id))
+
+
+def _set_current_job(client_id, job_id):
+    bucket = _client_bucket(client_id)
+    ACTIVE_JOB_IDS[bucket] = job_id
+    LATEST_JOB_IDS[bucket] = job_id
+
+
+def _clear_active_job(job_id):
+    """Clear the pointer in every bucket that references this job (usually one)."""
+    for key, value in list(ACTIVE_JOB_IDS.items()):
+        if value == job_id:
+            ACTIVE_JOB_IDS[key] = None
+
+
+def _client_busy(client_id):
+    current = _active_job_id(client_id)
+    if not current:
+        return False
+    job = JOBS.get(current)
+    return bool(job) and job.get("status") in ("queued", "running")
+
+
+def _active_job_count():
+    return sum(1 for job in JOBS.values() if job.get("status") in ("queued", "running"))
 
 
 def _new_job_id() -> str:
@@ -1695,9 +1781,7 @@ def _run_fetch(job_id: str, set_name: str, token: str, remember: bool) -> None:
     finally:
         token = ""
         with STATE_LOCK:
-            global ACTIVE_JOB_ID
-            if ACTIVE_JOB_ID == job_id:
-                ACTIVE_JOB_ID = None
+            _clear_active_job(job_id)
 
 
 def _run_fullyst_fetch(job_id: str, slug: str) -> None:
@@ -1808,9 +1892,7 @@ def _run_fullyst_fetch(job_id: str, slug: str) -> None:
                 error=str(exc)[:900])
     finally:
         with STATE_LOCK:
-            global ACTIVE_JOB_ID
-            if ACTIVE_JOB_ID == job_id:
-                ACTIVE_JOB_ID = None
+            _clear_active_job(job_id)
 
 
 def _raw_item(set_name: str, descriptor: dict, title: str) -> dict:
@@ -1935,9 +2017,7 @@ def _run_conversion(job_id: str, selected_indexes: list[int], mode: str) -> None
                 error=str(exc)[:900])
     finally:
         with STATE_LOCK:
-            global ACTIVE_JOB_ID
-            if ACTIVE_JOB_ID == job_id:
-                ACTIVE_JOB_ID = None
+            _clear_active_job(job_id)
 
 
 
@@ -1951,12 +2031,18 @@ web_app = FastAPI(
     version="2.0.0",
 )
 
-# Enable CORS for all origins so Vercel can seamlessly interact with the API
+# Vercel deployments call this API cross-origin from the browser.
+# Note: allow_origins=["*"] cannot be combined with allow_credentials=True
+# (Starlette rejects it, and browsers refuse credentialed wildcard requests
+# anyway). This API serves public sticker tools and uses no cookies, so
+# credentials stay disabled. Optionally restrict origins via the
+# MODAL_ALLOWED_ORIGINS env var (comma-separated).
+_allowed_origins = [o.strip() for o in os.environ.get("MODAL_ALLOWED_ORIGINS", "*").split(",") if o.strip()] or ["*"]
 web_app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=_allowed_origins,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -2000,9 +2086,10 @@ def api_config():
 
 
 @web_app.get("/api/latest")
-def api_latest():
+def api_latest(x_client_id: str | None = Header(default=None)):
+    cid = _client_id(x_client_id)
     with STATE_LOCK:
-        return {"id": LATEST_JOB_ID}
+        return {"id": _latest_job_id(cid)}
 
 
 @web_app.post("/api/token/forget")
@@ -2011,8 +2098,8 @@ def api_token_forget():
 
 
 @web_app.post("/api/fetch", status_code=202)
-async def api_fetch(request: FastApiRequest):
-    global ACTIVE_JOB_ID, LATEST_JOB_ID
+async def api_fetch(request: FastApiRequest, x_client_id: str | None = Header(default=None)):
+    cid = _client_id(x_client_id)
     try:
         data = await request.json()
         if not isinstance(data, dict):
@@ -2028,8 +2115,10 @@ async def api_fetch(request: FastApiRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
     with STATE_LOCK:
-        if ACTIVE_JOB_ID and JOBS.get(ACTIVE_JOB_ID, {}).get("status") in ("queued", "running"):
-            raise HTTPException(status_code=409, detail="A conversion or fetch job is already running. Please wait.")
+        if _client_busy(cid):
+            raise HTTPException(status_code=409, detail="A conversion or fetch job is already running for this browser. Please wait.")
+        if _active_job_count() >= MAX_ACTIVE_JOBS_TOTAL:
+            raise HTTPException(status_code=409, detail="The converter is busy with other packs. Please try again in a moment.")
         _trim_jobs()
         job_id = _new_job_id()
         JOBS[job_id] = {
@@ -2037,10 +2126,11 @@ async def api_fetch(request: FastApiRequest):
             "message": "Preparing to fetch stickers…", "done": 0,
             "total": 0, "packs": [], "packFiles": [],
             "activityLog": [], "_activitySeq": 0,
-            "outputDir": None, "created": time.time()
+            "outputDir": None, "created": time.time(),
+            "clientId": _client_bucket(cid),
         }
         _append_activity_log(JOBS[job_id], "Queued", "Preparing to fetch stickers…")
-        ACTIVE_JOB_ID = LATEST_JOB_ID = job_id
+        _set_current_job(cid, job_id)
 
     threading.Thread(target=_run_fetch, args=(job_id, set_name, token, False),
                      name=f"sticker-fetch-{job_id}", daemon=True).start()
@@ -2048,8 +2138,8 @@ async def api_fetch(request: FastApiRequest):
 
 
 @web_app.post("/api/convert", status_code=202)
-async def api_convert(request: FastApiRequest):
-    global ACTIVE_JOB_ID, LATEST_JOB_ID
+async def api_convert(request: FastApiRequest, x_client_id: str | None = Header(default=None)):
+    cid = _client_id(x_client_id)
     try:
         data = await request.json()
         if not isinstance(data, dict):
@@ -2065,10 +2155,11 @@ async def api_convert(request: FastApiRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
     with STATE_LOCK:
-        if ACTIVE_JOB_ID and JOBS.get(ACTIVE_JOB_ID, {}).get("status") in ("queued", "running"):
-            raise HTTPException(status_code=409, detail="A job is already running. Wait for it to finish first.")
+        if _client_busy(cid):
+            raise HTTPException(status_code=409, detail="A job is already running for this browser. Wait for it to finish first.")
         job = JOBS.get(job_id)
-        if not job or job.get("status") != "ready":
+        _require_job_access(job, cid)
+        if job.get("status") != "ready":
             raise HTTPException(status_code=409, detail="Fetch a sticker pack before converting it.")
         descriptors = list(job.get("sourceItems", []))
         available = {item["index"] for item in descriptors}
@@ -2090,7 +2181,7 @@ async def api_convert(request: FastApiRequest):
                    done=0, total=len(selected), packs=[], packFiles=[], previewEntries=[],
                    outputDir=str(job_dir))
         _append_activity_log(job, "Starting", "Preparing your pack…")
-        ACTIVE_JOB_ID = LATEST_JOB_ID = job_id
+        _set_current_job(cid, job_id)
 
     threading.Thread(target=_run_conversion, args=(job_id, selected, mode),
                      name=f"sticker-convert-{job_id}", daemon=True).start()
@@ -2098,18 +2189,20 @@ async def api_convert(request: FastApiRequest):
 
 
 @web_app.get("/api/job/{job_id}")
-def api_job_status(job_id: str):
+def api_job_status(job_id: str, x_client_id: str | None = Header(default=None)):
+    cid = _client_id(x_client_id)
     with STATE_LOCK:
         job = JOBS.get(job_id)
-        if job:
+        if job and _job_access_allowed(job, cid):
             return _copy_public_state(job)
     raise HTTPException(status_code=404, detail="This app session has expired. Fetch the pack again.")
 
 
 @web_app.get("/api/job/{job_id}/thumb/{index}")
-def api_job_thumbnail(job_id: str, index: int):
+def api_job_thumbnail(job_id: str, index: int, x_client_id: str | None = Header(default=None), client_id: str | None = None):
+    cid = _client_id(x_client_id) or _client_id(client_id)
     with STATE_LOCK:
-        job = JOBS.get(job_id)
+        job = JOBS.get(job_id) if _job_access_allowed(JOBS.get(job_id), cid) else None
         thumbs = job.get("thumbnails", []) if job else []
         thumb = thumbs[index] if index < len(thumbs) else None
     if not thumb:
@@ -2118,7 +2211,10 @@ def api_job_thumbnail(job_id: str, index: int):
 
 
 @web_app.get("/api/job/{job_id}/preview/{index}")
-def api_job_large_preview(job_id: str, index: int):
+def api_job_large_preview(job_id: str, index: int, x_client_id: str | None = Header(default=None), client_id: str | None = None):
+    cid = _client_id(x_client_id) or _client_id(client_id)
+    if not _job_access_allowed(JOBS.get(job_id), cid):
+        raise HTTPException(status_code=404, detail="Preview not found.")
     with STATE_LOCK:
         job = JOBS.get(job_id)
         descriptors = job.get("sourceItems", []) if job else []
@@ -2171,7 +2267,10 @@ def api_job_large_preview(job_id: str, index: int):
 
 
 @web_app.get("/api/job/{job_id}/output/{pack_index}/{sticker_index}")
-def api_job_output_sticker(job_id: str, pack_index: int, sticker_index: int):
+def api_job_output_sticker(job_id: str, pack_index: int, sticker_index: int, x_client_id: str | None = Header(default=None), client_id: str | None = None):
+    cid = _client_id(x_client_id) or _client_id(client_id)
+    if not _job_access_allowed(JOBS.get(job_id), cid):
+        raise HTTPException(status_code=404, detail="Preview not found.")
     with STATE_LOCK:
         job = JOBS.get(job_id)
         files = job.get("packFiles", []) if job and job.get("status") == "done" else []
@@ -2190,7 +2289,10 @@ def api_job_output_sticker(job_id: str, pack_index: int, sticker_index: int):
 
 @web_app.get("/download/{job_id}/{index}")
 @web_app.get("/api/download/{job_id}/{index}")
-def api_download_pack(job_id: str, index: int):
+def api_download_pack(job_id: str, index: int, x_client_id: str | None = Header(default=None), client_id: str | None = None):
+    cid = _client_id(x_client_id) or _client_id(client_id)
+    if not _job_access_allowed(JOBS.get(job_id), cid):
+        raise HTTPException(status_code=404, detail="File not found.")
     with STATE_LOCK:
         job = JOBS.get(job_id)
         files = job.get("packFiles", []) if job and job.get("status") == "done" else []
@@ -2221,22 +2323,24 @@ def api_fullyst_search(q: str = "", page: int = 1):
 
 
 @web_app.get("/api/fullyst/visited-pages")
-def api_fullyst_visited_pages_get():
+def api_fullyst_visited_pages_get(x_client_id: str | None = Header(default=None)):
+    cid = _client_id(x_client_id)
     try:
-        pages = _get_fullyst_visited_pages()
+        pages = _get_fullyst_visited_pages(cid)
         return {"pages": pages, "count": len(pages)}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @web_app.post("/api/fullyst/visited-pages")
-async def api_fullyst_visited_pages_post(request: FastApiRequest):
+async def api_fullyst_visited_pages_post(request: FastApiRequest, x_client_id: str | None = Header(default=None)):
+    cid = _client_id(x_client_id)
     try:
         data = await request.json()
         page = data.get("page")
         if type(page) is not int:
             raise ValueError("Enter a valid Fullyst catalog page number.")
-        return _mark_fullyst_page_visited(page)
+        return _mark_fullyst_page_visited(page, cid)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -2256,8 +2360,8 @@ def api_fullyst_animated_preview(slug: str):
 
 
 @web_app.post("/api/fullyst/fetch", status_code=202)
-async def api_fullyst_fetch(request: FastApiRequest):
-    global ACTIVE_JOB_ID, LATEST_JOB_ID
+async def api_fullyst_fetch(request: FastApiRequest, x_client_id: str | None = Header(default=None)):
+    cid = _client_id(x_client_id)
     try:
         data = await request.json()
         slug = str(data.get("slug", "")).strip()
@@ -2273,8 +2377,10 @@ async def api_fullyst_fetch(request: FastApiRequest):
         raise HTTPException(status_code=400, detail=str(exc))
 
     with STATE_LOCK:
-        if ACTIVE_JOB_ID and JOBS.get(ACTIVE_JOB_ID, {}).get("status") in ("queued", "running"):
-            raise HTTPException(status_code=409, detail="A job is already running. Wait for it to finish first.")
+        if _client_busy(cid):
+            raise HTTPException(status_code=409, detail="A job is already running for this browser. Wait for it to finish first.")
+        if _active_job_count() >= MAX_ACTIVE_JOBS_TOTAL:
+            raise HTTPException(status_code=409, detail="The converter is busy with other packs. Please try again in a moment.")
         _trim_jobs()
         job_id = _new_job_id()
         JOBS[job_id] = {
@@ -2283,10 +2389,11 @@ async def api_fullyst_fetch(request: FastApiRequest):
             "total": 0, "packs": [], "packFiles": [], "source": "Fullyst",
             "sourceSlug": slug, "failedCount": 0, "isAdult": adult_hint,
             "activityLog": [], "_activitySeq": 0,
-            "outputDir": None, "created": time.time()
+            "outputDir": None, "created": time.time(),
+            "clientId": _client_bucket(cid),
         }
         _append_activity_log(JOBS[job_id], "Queued", "Preparing Fullyst import…")
-        ACTIVE_JOB_ID = LATEST_JOB_ID = job_id
+        _set_current_job(cid, job_id)
 
     threading.Thread(target=_run_fullyst_fetch, args=(job_id, slug),
                      name=f"fullyst-fetch-{job_id}", daemon=True).start()
@@ -2307,14 +2414,15 @@ def api_collection_get():
 
 
 @web_app.post("/api/collection/save")
-async def api_collection_save(request: FastApiRequest):
+async def api_collection_save(request: FastApiRequest, x_client_id: str | None = Header(default=None)):
+    cid = _client_id(x_client_id)
     try:
         data = await request.json()
         job_id = str(data.get("job_id", "")).strip()
         index = data.get("index")
         if type(index) is not int:
             raise ValueError("Choose a sticker from the current pack.")
-        return _save_collection_sticker(job_id, index)
+        return _save_collection_sticker(job_id, index, cid)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:
@@ -2393,14 +2501,15 @@ async def api_collection_group_delete(request: FastApiRequest):
 
 
 @web_app.post("/api/collection/convert", status_code=202)
-async def api_collection_convert(request: FastApiRequest):
+async def api_collection_convert(request: FastApiRequest, x_client_id: str | None = Header(default=None)):
+    cid = _client_id(x_client_id)
     try:
         data = await request.json()
         selected = data.get("selected", [])
         if not isinstance(selected, list) or any(not isinstance(item, str) for item in selected):
             raise ValueError("The saved-sticker selection is invalid.")
         title = str(data.get("title", "")).strip()
-        job_id = _start_collection_conversion(selected, title)
+        job_id = _start_collection_conversion(selected, title, client_id=cid)
         return {"id": job_id}
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

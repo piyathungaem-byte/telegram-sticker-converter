@@ -124,3 +124,8 @@ WhatsApp's chat screen.
 | `assets/`, `local_pack/` | Bundled inputs for the end-to-end self-test and local-file example |
 | `diagnostic/` | Test `.wastickers` files for import troubleshooting |
 | `make_diagnostics.py`, `verify_diagnostics.py` | Rebuild and verify the diagnostic packs |
+| `frontend/` + `backend/` | Hosted deployment: Next.js 14 app (Vercel) and Modal.com FastAPI conversion engine — see `DEPLOYMENT.md` |
+
+### Hosted version
+
+A browser-hosted variant lives in `frontend/` (Next.js 14 on Vercel) + `backend/` (FastAPI on Modal.com). It tracks the Fullyst sticker catalog as the main experience. Deployment steps and the per-browser session model/limits are documented in [`DEPLOYMENT.md`](DEPLOYMENT.md).

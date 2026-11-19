@@ -8,8 +8,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const FULLYST_BASE = 'https://fullyst.com';
-const FULLYST_STICKER_HOST = 'stickers.fullyst.com';
 const PAGE_SIZE = 10;
+const MAX_HTML_BYTES = 4 * 1024 * 1024;
+const FETCH_TIMEOUT_MS = 15_000;
 
 // ── Adult-content keyword filter ──────────────────────────────────────────────
 const ADULT_PATTERN =
@@ -55,12 +56,8 @@ interface ParsedPack {
 function parseFullystHtml(html: string): { packs: ParsedPack[]; pageCount: number } {
   const packs: ParsedPack[] = [];
 
-  // Extract sticker-set card blocks by finding the opening div and walking to its closing tag
-  const cardPattern = /<div\b[^>]*\bsticker-set\b[^>]*>([\s\S]*?)<\/div>\s*(?=<div\b[^>]*\bsticker-set\b|<\/section|<\/main|$)/gi;
-
-  // We use a simpler approach: split on sticker-set div openings
+  // Split on sticker-set div openings; sections[0] is preamble, the rest are card interiors
   const sections = html.split(/<div\b[^>]*class="[^"]*\bsticker-set\b[^"]*"[^>]*>/i);
-  // sections[0] is preamble, sections[1..n] are card interiors until next boundary
 
   for (let i = 1; i < sections.length; i++) {
     const chunk = sections[i];
@@ -138,6 +135,7 @@ export async function GET(req: NextRequest) {
         Accept: 'text/html,application/xhtml+xml',
       },
       next: { revalidate: 60 }, // cache for 60 s on Vercel edge
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!res.ok) {
@@ -147,7 +145,14 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    const contentLength = Number(res.headers.get('content-length') || '0');
+    if (contentLength && contentLength > MAX_HTML_BYTES) {
+      return NextResponse.json({ error: 'Catalog page too large' }, { status: 502 });
+    }
     const html = await res.text();
+    if (html.length > MAX_HTML_BYTES) {
+      return NextResponse.json({ error: 'Catalog page too large' }, { status: 502 });
+    }
     const { packs, pageCount } = parseFullystHtml(html);
     const clampedPage = Math.min(page, pageCount);
 

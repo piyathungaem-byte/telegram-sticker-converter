@@ -1,4 +1,5 @@
 import type { Config } from "tailwindcss";
+import animate from "tailwindcss-animate";
 
 const config: Config = {
   content: [
@@ -31,9 +32,14 @@ const config: Config = {
           telegram: "#2aabee",
           whatsapp: "#25d366",
         },
+        // Secondary text/status colors — palette matches webapp.py (--muted/--warn/--bad)
+        muted: "#9aa9a5",
+        dim: "#72817e",
+        warn: "#f1c879",
+        bad: "#ff9b9b",
       },
     },
   },
-  plugins: [],
+  plugins: [animate],
 };
 export default config;

@@ -380,3 +380,8 @@ vite.config.ts.timestamp-*
 
 diagnostic
 local_pack
+# Local scratch from running convert.py --self-test
+work/
+report.json
+modal_data/
+.eslintcache

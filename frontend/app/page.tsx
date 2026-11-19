@@ -86,6 +86,10 @@ export default function Home() {
   const [collectionGroups, setCollectionGroups] = useState<CollectionGroup[]>([]);
 
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Consecutive poll failures — tolerate transient network/Modal hiccups;
+  // only give up after several in a row (the job keeps running server-side).
+  const POLL_ERROR_LIMIT = 5;
+  const pollFailuresRef = useRef(0);
 
   const showToast = useCallback((message: string, type: 'info' | 'success' | 'error' | 'warn' = 'info') => {
     setToast({ show: true, message, type });
@@ -189,7 +193,8 @@ export default function Home() {
               sourceSlug: job.sourceSlug,
               isAdult: job.isAdult,
             });
-            startPolling(job.id);
+            // 'ready' is terminal until the user converts — no poll needed
+            setFetching(false);
           } else if (job.status === 'done') {
             setJobState({
               phase: job.phase || 'Done',
@@ -212,6 +217,7 @@ export default function Home() {
         // Silently ignore
       }
     })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Polling loop
@@ -220,10 +226,12 @@ export default function Home() {
       clearInterval(pollIntervalRef.current);
       pollIntervalRef.current = null;
     }
+    pollFailuresRef.current = 0;
 
     const intervalId = setInterval(async () => {
       try {
         const job = await api.getJob(jobId);
+        pollFailuresRef.current = 0;
         setJobState({
           phase: job.phase || job.status,
           message: job.message || '',
@@ -259,9 +267,19 @@ export default function Home() {
           setFetching(false);
         }
 
-        if (job.status === 'done' && job.packs && job.packs.length > 0) {
-          setPacks(job.packs);
+        if (job.status === 'done') {
+          // 'done' is terminal even with zero packs (e.g. selection could not
+          // form a pack) — never leave the spinner or the interval running.
+          if (job.packs && job.packs.length > 0) {
+            setPacks(job.packs);
+          } else {
+            showToast(
+              job.message || 'No WhatsApp pack could be made. Each pack needs at least 3 stickers of one type.',
+              'warn'
+            );
+          }
           setConverting(false);
+          setFetching(false);
           clearInterval(intervalId);
           pollIntervalRef.current = null;
         } else if (job.status === 'failed') {
@@ -272,11 +290,16 @@ export default function Home() {
           pollIntervalRef.current = null;
         }
       } catch (err: any) {
-        clearInterval(intervalId);
-        pollIntervalRef.current = null;
-        setFetching(false);
-        setConverting(false);
-        showToast(err.message, 'error');
+        // Transient failure — the Modal job keeps running server-side.
+        // Only give up after several consecutive poll errors.
+        pollFailuresRef.current += 1;
+        if (pollFailuresRef.current >= POLL_ERROR_LIMIT) {
+          clearInterval(intervalId);
+          pollIntervalRef.current = null;
+          setFetching(false);
+          setConverting(false);
+          showToast(err?.message || 'Lost connection to the backend. Check your network and try again.', 'error');
+        }
       }
     }, 700);
 
@@ -421,6 +444,13 @@ export default function Home() {
     } catch (err: any) {
       showToast(err.message, 'error');
     }
+  };
+
+  // Re-run the Fullyst import to retry stickers that failed to download
+  // (mirrors webapp.py's "Retry skipped stickers" button — Fullyst only)
+  const handleRetryFailed = () => {
+    if (jobState.source !== 'Fullyst' || !jobState.sourceSlug) return;
+    handleImportFullyst(jobState.sourceSlug, packTitle || jobState.sourceSlug, jobState.isAdult);
   };
 
   const handleReset = () => {
@@ -586,6 +616,8 @@ export default function Home() {
               onConvertFull={handleConvertFull}
               converting={converting}
               source={jobState.source}
+              failedCount={jobState.failedCount ?? 0}
+              onRetryFailed={handleRetryFailed}
               isAdult={jobState.isAdult}
               showAdultPreviews={appSettings.showAdultPreviews}
               onToggleAdultPreviews={handleToggleAdultPreviews}
@@ -615,6 +647,7 @@ export default function Home() {
         onSaveFavorite={handleSaveFavorite}
         onConvertSelected={handleConvertSelected}
         onConvertFull={handleConvertFull}
+        onRetryFailed={handleRetryFailed}
       />
 
       <SettingsModal

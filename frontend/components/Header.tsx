@@ -51,7 +51,7 @@ export function Header({
           {backendStatus.status === 'connected' && (
             <>
               <span className="w-2 h-2 rounded-full bg-mint shadow-[0_0_8px_#38d69d]" />
-              <span className="text-white">Modal: Online ({backendStatus.latency}ms)</span>
+              <span className="text-white">Modal: Online ({Math.round(backendStatus.latency ?? 0)}ms)</span>
             </>
           )}
           {backendStatus.status === 'disconnected' && (

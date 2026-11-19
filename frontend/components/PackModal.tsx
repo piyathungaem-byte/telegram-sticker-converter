@@ -34,6 +34,7 @@ interface PackModalProps {
   onSaveFavorite?: (sticker: Sticker) => void;
   onConvertSelected: (selectedIndices: number[]) => void;
   onConvertFull: () => void;
+  onRetryFailed?: () => void;
 }
 
 export function PackModal({
@@ -53,6 +54,7 @@ export function PackModal({
   onSaveFavorite,
   onConvertSelected,
   onConvertFull,
+  onRetryFailed,
 }: PackModalProps) {
   const logContainerRef = useRef<HTMLDivElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -286,6 +288,9 @@ export function PackModal({
               onConvertSelected={onConvertSelected}
               onConvertFull={onConvertFull}
               converting={converting}
+              source={jobState.source}
+              failedCount={jobState.failedCount ?? 0}
+              onRetryFailed={onRetryFailed}
               isAdult={isAdult}
               showAdultPreviews={showAdultPreviews}
               onToggleAdultPreviews={onToggleAdultPreviews}

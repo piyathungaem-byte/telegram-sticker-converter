@@ -36,7 +36,7 @@ Modal will build the container image (installing ffmpeg, Pillow, rlottie-python,
 └── 🌐 Created web endpoint -> https://<your-modal-workspace>--telegram-sticker-converter-fastapi-app.modal.run
 ```
 
-**Copy that URL!** You will paste it into the frontend on Vercel (or configure it in `VITE_MODAL_API_URL`).
+**Copy that URL!** You will paste it into the frontend on Vercel (or set `NEXT_PUBLIC_MODAL_API_URL` in the Vercel project environment variables).
 
 ---
 

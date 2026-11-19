@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# NOTE: keep this file in sync with the other convert.py in this repo.
+# backend/modal_app.py bundles the backend/ copy into the Modal image,
+# while the root convert.py powers webapp.py, install.py and the CLI.
 """
 Telegram -> WhatsApp sticker converter.
 
@@ -163,7 +166,7 @@ def extract_video_frames(src: Path, out_dir: Path, px: int = WA_STICKER_PX) -> l
           f"pad={px}:{px}:(ow-iw)/2:(oh-ih)/2:color=0x00000000,format=rgba")
     run([need_ffmpeg(), "-hide_banner", "-nostdin", "-loglevel", "error", "-y",
          "-threads", "1", "-filter_threads", "1", "-i", str(src),
-         "-vsync", "0", "-pix_fmt", "rgba", "-vf", vf, str(out_dir / "%05d.png")])
+         "-fps_mode", "passthrough", "-pix_fmt", "rgba", "-vf", vf, str(out_dir / "%05d.png")])
     return sorted(out_dir.glob("*.png"))
 
 
