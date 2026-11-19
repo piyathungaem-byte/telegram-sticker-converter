@@ -221,11 +221,13 @@ export function PackModal({
           </div>
         )}
 
-        {/* ═══ Activity Log inside modal (matching webapp.py activityPanel move) ═══ */}
-        {isRunning && jobState.activityLog && (
+        {/* ═══ Activity Log inside modal (matching webapp.py activityPanel move) ═══
+            Kept visible after the job finishes too — webapp.py always shows the log
+            panel; it stays open while running, collapsed once done. */}
+        {(isRunning || (jobState.activityLog?.length ?? 0) > 0) && jobState.activityLog && (
           <div className="pack-modal-activity">
             <details
-              open={jobState.activityLog.length > 0}
+              open={isRunning && jobState.activityLog.length > 0}
               className="live-log-modal"
             >
               <summary className="live-log-summary">
