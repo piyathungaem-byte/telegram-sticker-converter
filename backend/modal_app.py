@@ -2582,14 +2582,21 @@ def api_collection_preview(item_id: str):
 # Modal Deployment ASGI Hook
 # ---------------------------------------------------------------------------
 
+# Job state and sticker thumbnails live in this container's memory (JOBS),
+# so the web app MUST run as exactly one container — otherwise Modal can
+# autoscale/replace the container mid-session and every job/thumb URL 404s
+# (empty JOBS). Single container = webapp.py's single-process guarantee.
+# scale-to-zero is still allowed when idle; a fresh container starts empty,
+# which the frontend already handles with an "app session expired" toast.
 @app.function(
     image=image,
     volumes={"/data": volume},
-    timeout=900,
+    timeout=86400,
     cpu=2.0,
     memory=2048,
+    min_containers=0,
+    max_containers=1,
 )
-@modal.concurrent(max_inputs=100)
 @modal.asgi_app()
 def fastapi_app():
     return web_app
