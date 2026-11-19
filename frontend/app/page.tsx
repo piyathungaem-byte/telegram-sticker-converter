@@ -321,6 +321,8 @@ export default function Home() {
     setStickers([]);
     setPacks([]);
     setCurrentJobId(null);
+    setPackModalAdult(false);
+    setPackTitle('');
     setJobState({
       phase: 'Connecting',
       message: 'Contacting Telegram API…',
@@ -409,6 +411,10 @@ export default function Home() {
       if (!latest.id) return false;
       setCurrentJobId(latest.id);
       setPackModalTitle('Current job');
+      // Clear stale per-pack state so an 18+ badge / previous title can't bleed
+      // into the followed job (the poll sets them again from the real job).
+      setPackTitle('');
+      setPackModalAdult(false);
       setPackModalOpen(true);
       setFetching(true);
       setStickers([]);

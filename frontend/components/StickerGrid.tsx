@@ -67,7 +67,9 @@ export function StickerGrid({
     }
   };
 
-  const startLongPress = (sticker: Sticker) => {
+  const startLongPress = (sticker: Sticker, e: React.PointerEvent) => {
+    // Ignore non-primary mouse buttons (e.g. right-click — handled by onContextMenu)
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     clearLongPress();
     holdTriggeredRef.current = false;
     longPressTimerRef.current = window.setTimeout(() => {
@@ -400,7 +402,7 @@ export function StickerGrid({
                   attachHoldPreview); a "View" pill appears on hover (desktop). */}
               <div
                 className="relative w-full aspect-square rounded-lg sticker-checkerboard flex items-center justify-center p-1.5 mt-5 overflow-hidden select-none touch-pan-y"
-                onPointerDown={() => startLongPress(sticker)}
+                onPointerDown={(e) => startLongPress(sticker, e)}
                 onPointerUp={clearLongPress}
                 onPointerLeave={clearLongPress}
                 onPointerCancel={clearLongPress}
@@ -426,7 +428,9 @@ export function StickerGrid({
                   loading="lazy"
                   draggable={false}
                 />
-                {/* Hover quick-view (desktop). On touch devices, press & hold the thumbnail. */}
+                {/* Hover quick-view (desktop). Only the pill is hit-testable — the rest of the
+                    thumbnail stays click-through so tap-to-select keeps working; invisible until
+                    group hover / keyboard focus. On touch, press & hold the thumbnail. */}
                 <button
                   type="button"
                   aria-label={`View sticker ${sticker.sourceIndex}`}
@@ -434,11 +438,9 @@ export function StickerGrid({
                     e.stopPropagation();
                     onPreview(sticker);
                   }}
-                  className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 hover:bg-black/40 transition focus:opacity-100 group-hover:opacity-100"
+                  className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-10 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/75 text-[11px] font-bold text-white whitespace-nowrap pointer-events-none opacity-0 hover:bg-black/90 group-hover:pointer-events-auto group-hover:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-mint transition"
                 >
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/75 text-[11px] font-bold text-white pointer-events-none">
-                    <Eye className="w-3.5 h-3.5" /> View
-                  </span>
+                  <Eye className="w-3.5 h-3.5" /> View
                 </button>
               </div>
 
