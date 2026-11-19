@@ -7,6 +7,7 @@ export interface Sticker {
   previewReady?: boolean;
   previewAvailable?: boolean;
   thumbUrl?: string;
+  thumbData?: string;
   previewUrl?: string;
   largePreviewUrl?: string;
   isAdult?: boolean;

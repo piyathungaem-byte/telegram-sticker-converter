@@ -262,9 +262,15 @@ export default function Home() {
           });
         }
 
-        // Clear fetching spinner once the pack is "ready" or done
+        // Clear fetching spinner once the pack is "ready" or done.
+        // 'ready' is terminal for the picker: stop polling so the base64
+        // thumb payload isn't re-downloaded every 700 ms (convert restarts polling).
         if (job.status === 'ready' || job.status === 'done' || (job.stickers && job.stickers.length > 0)) {
           setFetching(false);
+        }
+        if (job.status === 'ready') {
+          clearInterval(intervalId);
+          pollIntervalRef.current = null;
         }
 
         if (job.status === 'done') {
