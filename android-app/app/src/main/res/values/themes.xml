@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.StickerStudio" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#0F1114</item>
+        <item name="android:navigationBarColor">#1A1D21</item>
+        <item name="android:windowBackground">#0F1114</item>
+    </style>
+</resources>

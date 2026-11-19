@@ -1,0 +1,5 @@
+# Everything the converter needs. No system packages required.
+Pillow>=10.0            # image + animated WebP encode (alpha_quality), PNG quantization
+rlottie-python>=1.3.8   # TGS (Lottie) rendering - ships wheels for Windows/macOS/Linux
+requests>=2.31          # Telegram Bot API, with retries
+imageio-ffmpeg>=0.4.9   # bundles an ffmpeg binary - decodes WEBM video stickers

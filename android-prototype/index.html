@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>Sticker Studio · Android Prototype</title>
+<style>
+/* ─── Reset & Base ─── */
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#0f1114;--surface:#1a1d21;--surface2:#22262b;--surface3:#2b3036;
+  --card:#1e2227;--elevated:#262b31;
+  --border:#323840;--border-light:#3e444c;
+  --text:#e8edf2;--text2:#b0b8c4;--text3:#7a8494;--text4:#525c6a;
+  --mint:#7ddcb5;--mint-dim:#3b8a6c;--mint-bg:#1a3a2e;--mint-bg2:#223d33;
+  --red:#ff8a8a;--red-bg:#3b2222;
+  --warn:#f5c86a;--warn-bg:#3a3220;
+  --blue:#7aadff;
+  --radius:16px;--radius-sm:12px;--radius-xs:8px;
+  --safe-top:44px;--safe-bottom:34px;
+  --nav-h:64px;--bottom-nav-h:68px;
+}
+html,body{height:100%;overflow:hidden}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Noto Sans",sans-serif;
+  font-size:15px;line-height:1.5;color:var(--text);background:#000;
+  display:flex;justify-content:center;align-items:center;
+}
+
+/* ─── Phone Frame ─── */
+.phone-frame{
+  position:relative;width:393px;height:852px;
+  background:var(--bg);border-radius:44px;overflow:hidden;
+  box-shadow:0 0 0 3px #2a2d32,0 0 0 6px #111316,0 30px 80px #000a;
+}
+.phone-frame::before{
+  content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);
+  width:126px;height:34px;background:#000;border-radius:0 0 20px 20px;z-index:100;
+}
+.status-bar{
+  position:absolute;top:0;left:0;right:0;height:var(--safe-top);z-index:99;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 28px 0;font-size:12px;font-weight:600;color:var(--text2);
+}
+.status-bar .time{margin-left:4px}
+.status-bar .icons{display:flex;gap:5px;align-items:center;font-size:11px}
+
+/* ─── Screens ─── */
+.screen{
+  position:absolute;inset:0;
+  padding-top:var(--safe-top);
+  overflow-y:auto;overflow-x:hidden;
+  display:none;flex-direction:column;
+  scrollbar-width:none;
+  transition:opacity .22s,transform .22s;
+}
+.screen::-webkit-scrollbar{display:none}
+.screen.active{display:flex}
+
+/* ─── Top App Bar ─── */
+.app-bar{
+  position:sticky;top:0;z-index:50;
+  display:flex;align-items:center;gap:12px;
+  padding:10px 16px 10px;min-height:var(--nav-h);
+  background:var(--bg);
+}
+.app-bar .back-btn{
+  width:40px;height:40px;border-radius:50%;border:none;
+  background:transparent;color:var(--text);font-size:20px;
+  display:grid;place-items:center;cursor:pointer;flex-shrink:0;
+}
+.app-bar .back-btn:active{background:var(--surface2)}
+.app-bar h1{font-size:20px;font-weight:700;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.app-bar .bar-action{
+  width:40px;height:40px;border-radius:50%;border:none;
+  background:transparent;color:var(--text2);font-size:18px;
+  display:grid;place-items:center;cursor:pointer;flex-shrink:0;
+}
+.app-bar .bar-action:active{background:var(--surface2)}
+
+/* ─── Bottom Nav ─── */
+.bottom-nav{
+  position:absolute;bottom:0;left:0;right:0;
+  height:calc(var(--bottom-nav-h) + var(--safe-bottom));
+  padding-bottom:var(--safe-bottom);
+  background:var(--surface);border-top:1px solid var(--border);
+  display:flex;z-index:50;
+}
+.nav-item{
+  flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:3px;border:none;background:none;color:var(--text3);font-size:11px;
+  font-weight:600;cursor:pointer;position:relative;padding:6px 0;
+}
+.nav-item.active{color:var(--mint)}
+.nav-item .nav-icon{font-size:22px;height:26px;display:grid;place-items:center}
+.nav-item.active .nav-icon{
+  background:var(--mint-bg);border-radius:99px;padding:0 16px;
+}
+.nav-item .badge{
+  position:absolute;top:4px;right:calc(50% - 22px);
+  min-width:16px;height:16px;padding:0 4px;
+  background:var(--mint);color:#0d1f18;font-size:9px;font-weight:800;
+  border-radius:99px;display:grid;place-items:center;
+}
+
+/* ─── Content helpers ─── */
+.content-pad{padding:0 16px}
+.section-title{font-size:13px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;margin:20px 0 10px}
+.scroll-bottom{padding-bottom:calc(var(--bottom-nav-h) + var(--safe-bottom) + 16px)}
+
+/* ─── Cards ─── */
+.card{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius);padding:16px;margin-bottom:12px;
+}
+.card-elevated{
+  background:var(--elevated);border:1px solid var(--border-light);
+  border-radius:var(--radius);padding:16px;margin-bottom:12px;
+}
+
+/* ─── Inputs ─── */
+.input-group{margin-bottom:14px}
+.input-group label{display:block;font-size:12px;font-weight:700;color:var(--text2);margin-bottom:6px}
+.text-input{
+  width:100%;padding:14px 14px;
+  background:var(--surface);border:1.5px solid var(--border);
+  border-radius:var(--radius-sm);color:var(--text);font-size:15px;
+  outline:none;transition:border-color .15s;
+}
+.text-input::placeholder{color:var(--text4)}
+.text-input:focus{border-color:var(--mint-dim)}
+
+/* ─── Buttons ─── */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  border:none;border-radius:var(--radius-sm);padding:14px 20px;
+  font-size:15px;font-weight:700;cursor:pointer;transition:.15s;
+  width:100%;
+}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:var(--mint);color:#0d1f18}
+.btn-primary:hover{background:#93e8c7}
+.btn-secondary{background:var(--mint-bg);color:var(--mint);border:1px solid var(--mint-dim)}
+.btn-secondary:hover{background:var(--mint-bg2)}
+.btn-outline{background:transparent;color:var(--text2);border:1px solid var(--border)}
+.btn-sm{padding:10px 14px;font-size:13px;width:auto;border-radius:var(--radius-xs)}
+.btn-icon{width:40px;height:40px;padding:0;border-radius:50%}
+
+/* ─── Chips ─── */
+.chip-row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.chip{
+  padding:8px 14px;border-radius:99px;font-size:12px;font-weight:700;
+  border:1px solid var(--border);background:var(--surface);color:var(--text2);
+  cursor:pointer;transition:.15s;
+}
+.chip.active{background:var(--mint-bg);color:var(--mint);border-color:var(--mint-dim)}
+
+/* ─── Sticker Grid ─── */
+.sticker-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.sticker-cell{
+  position:relative;aspect-ratio:1;border-radius:var(--radius-sm);
+  overflow:hidden;cursor:pointer;border:2px solid transparent;
+  background:var(--surface2);display:grid;place-items:center;
+  transition:border-color .15s;
+}
+.sticker-cell.selected{border-color:var(--mint)}
+.sticker-cell .check{
+  position:absolute;top:6px;right:6px;width:22px;height:22px;
+  border-radius:50%;border:2px solid var(--border-light);
+  background:var(--surface);display:grid;place-items:center;
+  font-size:12px;color:transparent;transition:.15s;
+}
+.sticker-cell.selected .check{background:var(--mint);border-color:var(--mint);color:#0d1f18}
+.sticker-emoji{font-size:48px;filter:drop-shadow(0 2px 6px #0006)}
+.sticker-tag{
+  position:absolute;bottom:4px;left:4px;
+  font-size:9px;font-weight:800;text-transform:uppercase;
+  letter-spacing:.04em;padding:2px 6px;border-radius:4px;
+  background:#0008;color:var(--mint);backdrop-filter:blur(4px);
+}
+.sticker-save{
+  position:absolute;bottom:4px;right:4px;width:26px;height:26px;
+  border-radius:50%;border:none;background:#0008;color:var(--text2);
+  font-size:14px;display:grid;place-items:center;cursor:pointer;
+  backdrop-filter:blur(4px);
+}
+.sticker-save.saved{color:var(--mint)}
+
+/* ─── Result Pack Cards ─── */
+.pack-card{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius);padding:14px;margin-bottom:12px;
+}
+.pack-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.pack-header h3{font-size:15px;font-weight:700}
+.pack-meta{font-size:11px;color:var(--text3)}
+.pack-thumbs{display:grid;grid-template-columns:repeat(6,1fr);gap:4px;margin:10px 0}
+.pack-thumb{
+  aspect-ratio:1;border-radius:6px;background:var(--surface2);
+  display:grid;place-items:center;font-size:22px;
+}
+.pack-actions{display:flex;gap:8px;margin-top:10px}
+
+/* ─── Progress ─── */
+.progress-bar{height:6px;border-radius:99px;background:var(--surface);overflow:hidden;margin:8px 0}
+.progress-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,var(--mint-dim),var(--mint));transition:width .4s ease}
+
+/* ─── Switcher / Toggle ─── */
+.toggle-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 0;border-bottom:1px solid var(--border);
+}
+.toggle-row:last-child{border-bottom:none}
+.toggle-label{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.toggle-label strong{font-size:14px;font-weight:600}
+.toggle-label small{font-size:12px;color:var(--text3)}
+.toggle{
+  width:48px;height:28px;border-radius:99px;padding:3px;
+  background:var(--surface3);border:none;cursor:pointer;flex-shrink:0;
+  position:relative;transition:background .2s;
+}
+.toggle.on{background:var(--mint)}
+.toggle::after{
+  content:'';position:absolute;top:3px;left:3px;
+  width:22px;height:22px;border-radius:50%;background:#fff;
+  transition:transform .2s;box-shadow:0 2px 4px #0004;
+}
+.toggle.on::after{transform:translateX(20px)}
+
+/* ─── FAB ─── */
+.fab{
+  position:fixed;bottom:calc(var(--bottom-nav-h) + var(--safe-bottom) + 16px);
+  right:calc(50% - 393px/2 + 16px);
+  width:56px;height:56px;border-radius:16px;border:none;
+  background:var(--mint);color:#0d1f18;font-size:24px;font-weight:700;
+  box-shadow:0 6px 20px #00000060;cursor:pointer;
+  display:grid;place-items:center;z-index:60;
+  transition:transform .15s;
+}
+.fab:active{transform:scale(.92)}
+
+/* ─── Snackbar ─── */
+.snackbar{
+  position:absolute;bottom:calc(var(--bottom-nav-h) + var(--safe-bottom) + 8px);
+  left:16px;right:16px;padding:14px 16px;
+  background:var(--elevated);border:1px solid var(--border);
+  border-radius:var(--radius-sm);font-size:13px;font-weight:600;
+  display:flex;align-items:center;gap:10px;z-index:80;
+  transform:translateY(100px);opacity:0;transition:.3s;
+}
+.snackbar.show{transform:translateY(0);opacity:1}
+.snackbar .snack-action{
+  margin-left:auto;color:var(--mint);background:none;border:none;
+  font-size:13px;font-weight:800;cursor:pointer;white-space:nowrap;
+}
+
+/* ─── Modal / Bottom Sheet ─── */
+.sheet-overlay{
+  position:absolute;inset:0;background:#000c;z-index:90;
+  display:none;align-items:flex-end;
+  padding-top:var(--safe-top);
+}
+.sheet-overlay.show{display:flex}
+.sheet{
+  width:100%;max-height:80%;background:var(--surface);
+  border-radius:24px 24px 0 0;padding:8px 16px calc(var(--safe-bottom) + 16px);
+  overflow-y:auto;
+}
+.sheet-handle{
+  width:36px;height:4px;border-radius:99px;background:var(--border-light);
+  margin:0 auto 16px;
+}
+.sheet h2{font-size:18px;font-weight:700;margin-bottom:4px}
+.sheet p{font-size:13px;color:var(--text3);margin-bottom:14px}
+
+/* ─── Animations ─── */
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.skeleton{background:var(--surface3);border-radius:var(--radius-xs);animation:pulse 1.5s ease-in-out infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{
+  width:24px;height:24px;border:3px solid var(--border);
+  border-top-color:var(--mint);border-radius:50%;
+  animation:spin .7s linear infinite;
+}
+@keyframes slideUp{from{transform:translateY(30px);opacity:0}to{transform:translateY(0);opacity:1}}
+.anim-in{animation:slideUp .35s ease-out both}
+
+/* ─── Screen-specific ─── */
+
+/* Home hero */
+.home-hero{
+  padding:20px 20px 0;
+}
+.home-hero .eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--mint);font-weight:800}
+.home-hero h1{font-size:28px;line-height:1.12;letter-spacing:-.03em;margin:6px 0 8px;font-weight:800}
+.home-hero p{color:var(--text3);font-size:14px}
+
+/* History list */
+.history-item{
+  display:flex;align-items:center;gap:12px;
+  padding:12px;border-radius:var(--radius-sm);
+  cursor:pointer;transition:background .15s;
+}
+.history-item:active{background:var(--surface2)}
+.history-thumb{
+  width:50px;height:50px;border-radius:var(--radius-xs);
+  background:var(--surface2);display:grid;place-items:center;font-size:26px;flex-shrink:0;
+}
+.history-info{flex:1;min-width:0}
+.history-info h4{font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.history-info p{font-size:12px;color:var(--text3)}
+.history-arrow{color:var(--text4);font-size:18px}
+
+/* Converting animation */
+.convert-visual{
+  display:flex;flex-direction:column;align-items:center;gap:16px;
+  padding:40px 20px 20px;
+}
+.convert-ring{
+  width:100px;height:100px;border-radius:50%;
+  border:4px solid var(--border);border-top-color:var(--mint);
+  animation:spin 1.2s linear infinite;
+  display:grid;place-items:center;
+}
+.convert-ring-inner{
+  width:74px;height:74px;border-radius:50%;
+  background:var(--card);display:grid;place-items:center;
+  font-size:36px;
+}
+.convert-stage{text-align:center}
+.convert-stage h2{font-size:20px;font-weight:700}
+.convert-stage p{font-size:13px;color:var(--text3);margin-top:4px}
+
+/* Log panel */
+.log-panel{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius-sm);margin:12px 16px;overflow:hidden;
+}
+.log-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 12px;cursor:pointer;font-size:12px;font-weight:700;color:var(--text2);
+}
+.log-entries{
+  max-height:180px;overflow-y:auto;padding:0 12px 10px;
+  font-family:"SF Mono",Menlo,Consolas,monospace;font-size:11px;
+  line-height:1.6;color:var(--text3);
+}
+.log-entry{display:flex;gap:8px}
+.log-time{color:var(--text4);flex-shrink:0;width:50px}
+.log-phase{color:var(--mint);flex-shrink:0;width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Empty state */
+.empty-state{
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+  padding:40px 20px;text-align:center;
+}
+.empty-icon{font-size:52px;opacity:.6}
+.empty-state h3{font-size:16px;font-weight:700}
+.empty-state p{font-size:13px;color:var(--text3);max-width:260px}
+
+/* Screen-specific scrolling */
+.screen-scroll{flex:1;overflow-y:auto;scrollbar-width:none}
+.screen-scroll::-webkit-scrollbar{display:none}
+
+/* Selection bar (sticky bottom) */
+.selection-bar{
+  position:sticky;bottom:0;
+  padding:12px 16px calc(var(--bottom-nav-h) + var(--safe-bottom) + 12px);
+  background:linear-gradient(transparent,var(--bg) 20%);
+  display:flex;gap:8px;
+}
+.selection-bar .btn{flex:1}
+
+/* Fullyst browse */
+.fullyst-card{
+  display:flex;gap:12px;align-items:center;
+  padding:12px;background:var(--card);border:1px solid var(--border);
+  border-radius:var(--radius-sm);margin-bottom:8px;cursor:pointer;
+}
+.fullyst-card:active{background:var(--surface2)}
+.fullyst-sample{
+  width:54px;height:54px;border-radius:var(--radius-xs);
+  background:var(--surface2);display:grid;place-items:center;font-size:28px;flex-shrink:0;
+}
+.fullyst-body{flex:1;min-width:0}
+.fullyst-body h4{font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fullyst-body p{font-size:11px;color:var(--text3)}
+.adult-badge{font-size:9px;font-weight:800;color:var(--warn);background:var(--warn-bg);padding:2px 6px;border-radius:99px}
+
+/* Screen nav info text */
+.screen-tab-info{
+  text-align:center;padding:16px;font-size:12px;color:var(--text4);
+}
+</style>
+</head>
+<body>
+
+<div class="phone-frame" id="phoneFrame">
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <span class="time">9:56</span>
+    <span class="icons">
+      <span>📶</span>
+      <span>🔋</span>
+    </span>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- SCREEN 1: HOME                              -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="screen active" id="screenHome">
+    <div class="screen-scroll scroll-bottom">
+      <div class="home-hero anim-in">
+        <span class="eyebrow">Sticker Studio</span>
+        <h1>Convert Telegram stickers to WhatsApp</h1>
+        <p>Fetch, preview, pick, and import — all on your phone.</p>
+      </div>
+
+      <div class="content-pad" style="margin-top:20px">
+        <div class="card anim-in" style="animation-delay:.05s">
+          <div class="input-group">
+            <label>Telegram sticker-pack link</label>
+            <input class="text-input" id="packInput" placeholder="https://t.me/addstickers/YourPack" value="https://t.me/addstickers/CuteCats">
+          </div>
+          <div class="input-group">
+            <label>Bot token</label>
+            <div style="display:flex;gap:8px">
+              <input class="text-input" type="password" placeholder="Paste token from @BotFather" value="1234567890:ABCxyz" style="flex:1">
+              <button class="btn btn-outline btn-sm" style="width:auto;flex-shrink:0">👁</button>
+            </div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin:-4px 0 14px">
+            <input type="checkbox" id="rememberCheck" checked style="accent-color:var(--mint);width:17px;height:17px">
+            <label for="rememberCheck" style="font-size:12px;color:var(--text2)">Remember token (encrypted on device)</label>
+          </div>
+          <button class="btn btn-primary" onclick="goTo('screenFetching')">
+            <span>🔍</span> Fetch sticker pack
+          </button>
+          <p style="font-size:11px;color:var(--text4);margin-top:10px;text-align:center">Token stays on your device. Never sent to any external service.</p>
+        </div>
+
+        <button class="btn btn-secondary anim-in" style="animation-delay:.1s" onclick="goTo('screenBrowse')">
+          <span>🌐</span> Browse Fullyst catalog · no token needed
+        </button>
+
+        <div class="section-title" style="margin-top:24px">Recent conversions</div>
+        <div class="card" style="padding:4px 0">
+          <div class="history-item" onclick="goTo('screenResult')">
+            <div class="history-thumb">🐱</div>
+            <div class="history-info">
+              <h4>CuteCats</h4>
+              <p>26 stickers · 2 packs · Today</p>
+            </div>
+            <span class="history-arrow">›</span>
+          </div>
+          <div class="history-item">
+            <div class="history-thumb">🦆</div>
+            <div class="history-info">
+              <h4>DuckEmoji</h4>
+              <p>18 stickers · 1 pack · Yesterday</p>
+            </div>
+            <span class="history-arrow">›</span>
+          </div>
+          <div class="history-item">
+            <div class="history-thumb">🐶</div>
+            <div class="history-info">
+              <h4>Cheems</h4>
+              <p>40 stickers · 2 packs · Oct 25</p>
+            </div>
+            <span class="history-arrow">›</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Nav -->
+    <nav class="bottom-nav">
+      <button class="nav-item active" onclick="switchTab(this,'screenHome')">
+        <span class="nav-icon">🏠</span>Home
+      </button>
+      <button class="nav-item" onclick="switchTab(this,'screenBrowse')">
+        <span class="nav-icon">🔍</span>Browse
+      </button>
+      <button class="nav-item" onclick="switchTab(this,'screenSaved')">
+        <span class="nav-icon">💾</span>Saved
+        <span class="badge">12</span>
+      </button>
+      <button class="nav-item" onclick="switchTab(this,'screenSettings')">
+        <span class="nav-icon">⚙️</span>Settings
+      </button>
+    </nav>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- SCREEN 2: FETCHING (loading state)          -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="screen" id="screenFetching">
+    <div class="app-bar">
+      <button class="back-btn" onclick="goTo('screenHome')">←</button>
+      <h1>Fetching pack…</h1>
+    </div>
+    <div class="screen-scroll">
+      <div class="convert-visual">
+        <div class="convert-ring">
+          <div class="convert-ring-inner">🐱</div>
+        </div>
+        <div class="convert-stage">
+          <h2>CuteCats</h2>
+          <p>Downloading stickers from Telegram…</p>
+        </div>
+      </div>
+      <div class="content-pad">
+        <div class="progress-bar"><div class="progress-fill" style="width:62%"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-top:4px">
+          <span>Downloading stickers…</span>
+          <span>16 / 26</span>
+        </div>
+      </div>
+
+      <div class="log-panel" style="margin-top:20px">
+        <div class="log-header">
+          <span>📋 Live activity log</span>
+          <span style="color:var(--text4)">16 events</span>
+        </div>
+        <div class="log-entries">
+          <div class="log-entry"><span class="log-time">09:56</span><span class="log-phase">Download</span><span>Fetched 14/26 (webp, 45.2 KB)</span></div>
+          <div class="log-entry"><span class="log-time">09:56</span><span class="log-phase">Download</span><span>Fetched 15/26 (tgs, 32.1 KB)</span></div>
+          <div class="log-entry"><span class="log-time">09:56</span><span class="log-phase">Download</span><span>Fetched 16/26 (webp, 28.7 KB)</span></div>
+        </div>
+      </div>
+
+      <div style="padding:30px 16px;text-align:center">
+        <button class="btn btn-primary" onclick="goTo('screenSelect')" style="max-width:280px;margin:0 auto">
+          Skip to preview → (demo)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- SCREEN 3: STICKER SELECTION                 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="screen" id="screenSelect">
+    <div class="app-bar">
+      <button class="back-btn" onclick="goTo('screenHome')">←</button>
+      <h1>CuteCats</h1>
+      <button class="bar-action" title="Select all" onclick="toggleSelectAll()">☑️</button>
+    </div>
+    <div class="screen-scroll">
+      <div class="content-pad">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+          <span style="font-size:13px;color:var(--text2)">26 stickers fetched</span>
+          <span id="selectedCount" style="font-size:13px;color:var(--mint);font-weight:700">8 selected</span>
+        </div>
+
+        <div class="chip-row">
+          <span class="chip active" onclick="filterChip(this)">All (26)</span>
+          <span class="chip" onclick="filterChip(this)">Static (14)</span>
+          <span class="chip" onclick="filterChip(this)">Animated (12)</span>
+        </div>
+
+        <div class="sticker-grid" id="stickerGrid">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+      <div class="selection-bar">
+        <button class="btn btn-secondary btn-sm" onclick="goTo('screenConverting')">Convert all</button>
+        <button class="btn btn-primary btn-sm" onclick="goTo('screenConverting')">Create selected (8)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- SCREEN 4: CONVERTING                        -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="screen" id="screenConverting">
+    <div class="app-bar">
+      <button class="back-btn" onclick="goTo('screenSelect')">←</button>
+      <h1>Converting…</h1>
+    </div>
+    <div class="screen-scroll">
+      <div class="convert-visual">
+        <div class="convert-ring">
+          <div class="convert-ring-inner">⚡</div>
+        </div>
+        <div class="convert-stage">
+          <h2>Building WhatsApp pack</h2>
+          <p>Converting sticker 5 of 8…</p>
+        </div>
+      </div>
+
+      <div class="content-pad">
+        <div class="progress-bar"><div class="progress-fill" style="width:58%"></div></div>
+        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text3);margin-top:4px">
+          <span>Encoding animated WebP (q75 α70 @ 20fps)…</span>
+          <span>5 / 8</span>
+        </div>
+      </div>
+
+      <div class="content-pad" style="margin-top:16px">
+        <div class="card" style="padding:12px">
+          <div style="font-size:12px;font-weight:700;color:var(--text2);margin-bottom:8px">Conversion details</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px">
+            <div><span style="color:var(--text3)">Static:</span> <span style="color:var(--text)">3 done</span></div>
+            <div><span style="color:var(--text3)">Animated:</span> <span style="color:var(--mint)">2 of 5</span></div>
+            <div><span style="color:var(--text3)">Quality:</span> <span style="color:var(--text)">Auto ladder</span></div>
+            <div><span style="color:var(--text3)">Format:</span> <span style="color:var(--text)">WebP 512×512</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="log-panel">
+        <div class="log-header">
+          <span>📋 Activity log</span>
+          <span style="color:var(--text4)">12 events</span>
+        </div>
+        <div class="log-entries">
+          <div class="log-entry"><span class="log-time">09:57</span><span class="log-phase">Static</span><span>01.webp → 48.3 KB ✓</span></div>
+          <div class="log-entry"><span class="log-time">09:57</span><span class="log-phase">Static</span><span>02.webp → 62.1 KB ✓</span></div>
+          <div class="log-entry"><span class="log-time">09:57</span><span class="log-phase">Static</span><span>03.webp → 39.7 KB ✓</span></div>
+          <div class="log-entry"><span class="log-time">09:57</span><span class="log-phase">TGS</span><span>04 render 75 frames @ 25fps</span></div>
+          <div class="log-entry"><span class="log-time">09:57</span><span class="log-phase">Encode</span><span>04 rung 0: q85/α85 → 512.3 KB</span></div>
+          <div class="log-entry"><span class="log-time">09:58</span><span class="log-phase">Encode</span><span>04 rung 1: q75/α70 → 441.8 KB ✓</span></div>
+          <div class="log-entry"><span class="log-time">09:58</span><span class="log-phase">TGS</span><span>05 render 60 frames @ 20fps</span></div>
+          <div class="log-entry"><span class="log-time">09:58</span><span class="log-phase">Encode</span><span>05 rung 0: q85/α85 → 487.2 KB ✓</span></div>
+        </div>
+      </div>
+
+      <div style="padding:30px 16px;text-align:center">
+        <button class="btn btn-primary" onclick="goTo('screenResult')" style="max-width:280px;margin:0 auto">
+          Skip to result → (demo)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- SCREEN 5: RESULT / DOWNLOAD                 -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="screen" id="screenResult">
+    <div class="app-bar">
+      <button class="back-btn" onclick="goTo('screenHome')">←</button>
+      <h1>Pack ready!</h1>
+      <button class="bar-action" title="Share">📤</button>
+    </div>
+    <div class="screen-scroll scroll-bottom">
+      <div class="content-pad">
+        <!-- Success banner -->
+        <div class="card anim-in" style="border-color:var(--mint-dim);background:var(--mint-bg)">
+          <div style="display:flex;align-items:center;gap:12px">
+            <span style="font-size:32px">✅</span>
+            <div>
+              <div style="font-size:16px;font-weight:700;color:var(--mint)">Conversion complete</div>
+              <div style="font-size:12px;color:var(--text2)">8 stickers → 2 packs ready for WhatsApp</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Pack 1 -->
+        <div class="pack-card anim-in" style="animation-delay:.08s">
+          <div class="pack-header">
+            <div>
+              <h3>CuteCats 1</h3>
+              <span class="pack-meta">5 animated · 487 KB</span>
+            </div>
+            <span style="font-size:10px;padding:4px 8px;background:var(--mint-bg);color:var(--mint);border-radius:99px;font-weight:800">ANIMATED</span>
+          </div>
+          <div class="pack-thumbs">
+            <div class="pack-thumb">😺</div>
+            <div class="pack-thumb">🐱</div>
+            <div class="pack-thumb">😸</div>
+            <div class="pack-thumb">😻</div>
+            <div class="pack-thumb">😽</div>
+          </div>
+          <div class="pack-actions">
+            <button class="btn btn-primary btn-sm" style="flex:1" onclick="showSnackbar('✅ Added to WhatsApp!')">
+              <span>💬</span> Add to WhatsApp
+            </button>
+            <button class="btn btn-outline btn-sm" style="flex:0;width:44px">📥</button>
+          </div>
+        </div>
+
+        <!-- Pack 2 -->
+        <div class="pack-card anim-in" style="animation-delay:.14s">
+          <div class="pack-header">
+            <div>
+              <h3>CuteCats 2</h3>
+              <span class="pack-meta">3 static · 142 KB</span>
+            </div>
+            <span style="font-size:10px;padding:4px 8px;background:var(--surface2);color:var(--text2);border-radius:99px;font-weight:800">STATIC</span>
+          </div>
+          <div class="pack-thumbs">
+            <div class="pack-thumb">🐱</div>
+            <div class="pack-thumb">😼</div>
+            <div class="pack-thumb">🙀</div>
+          </div>
+          <div class="pack-actions">
+            <button class="btn btn-primary btn-sm" style="flex:1" onclick="showSnackbar('✅ Added to WhatsApp!')">
+              <span>💬</span> Add to WhatsApp
+            </button>
+            <button class="btn btn-outline btn-sm" style="flex:0;width:44px">📥</button>
+          </div>
+        </div>
+
+        <!-- Info notes -->
+        <div class="card" style="padding:12px;border-color:var(--border)">
+          <div style="font-size:12px;color:var(--text3);display:flex;flex-direction:column;gap:6px">
+            <div>💡 <strong style="color:var(--text2)">Static & animated</strong> are in separate packs (WhatsApp requirement).</div>
+            <div>📲 Tap <strong style="color:var(--text2)">"Add to WhatsApp"</strong> to import directly via ContentProvider — no third-party app needed.</div>
+            <div>📥 Use the download button to save a <strong style="color:var(--text2)">.wastickers</strong> file instead.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Nav -->
+    <nav class="bottom-nav">
+      <button class="nav-item active"><span class="nav-icon">🏠</span>Home</button>
+      <button class="nav-item" onclick="switchTab(this,'screenBrowse')"><span class="nav-icon">🔍</span>Browse</button>
+      <button class="nav-item" onclick="switchTab(this,'screenSaved')"><span class="nav-icon">💾</span>Saved<span class="badge">12</span></button>
+      <button class="nav-item" onclick="switchTab(this,'screenSettings')"><span class="nav-icon">⚙️</span>Settings</button>
+    </nav>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- SCREEN 6: BROWSE / FULLYST CATALOG          -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="screen" id="screenBrowse">
+    <div class="app-bar">
+      <h1>Browse packs</h1>
+      <button class="bar-action" title="Filter">🔽</button>
+    </div>
+    <div class="screen-scroll scroll-bottom">
+      <div class="content-pad">
+        <div style="display:flex;gap:8px;margin-bottom:14px">
+          <input class="text-input" placeholder="Search packs, e.g. duck or cherry" style="flex:1">
+          <button class="btn btn-primary btn-sm" style="width:auto;padding:10px 16px">Search</button>
+        </div>
+
+        <div class="chip-row" style="margin-top:0">
+          <span class="chip active">Trending</span>
+          <span class="chip">Animals</span>
+          <span class="chip">Memes</span>
+          <span class="chip">Anime</span>
+          <span class="chip">Cute</span>
+        </div>
+
+        <div class="fullyst-card" onclick="goTo('screenFetching')">
+          <div class="fullyst-sample">🐱</div>
+          <div class="fullyst-body">
+            <h4>CuteCats</h4>
+            <p>26 stickers · Animated + Static</p>
+          </div>
+          <span style="color:var(--text4)">›</span>
+        </div>
+        <div class="fullyst-card">
+          <div class="fullyst-sample">🦆</div>
+          <div class="fullyst-body">
+            <h4>DuckWorld</h4>
+            <p>30 stickers · Animated</p>
+          </div>
+          <span style="color:var(--text4)">›</span>
+        </div>
+        <div class="fullyst-card">
+          <div class="fullyst-sample">🐸</div>
+          <div class="fullyst-body">
+            <h4>Pepe Classics</h4>
+            <p>48 stickers · Static</p>
+          </div>
+          <span style="color:var(--text4)">›</span>
+        </div>
+        <div class="fullyst-card">
+          <div class="fullyst-sample">🐶</div>
+          <div class="fullyst-body">
+            <h4>Cheems & Doge</h4>
+            <p>35 stickers · Animated</p>
+          </div>
+          <span style="color:var(--text4)">›</span>
+        </div>
+        <div class="fullyst-card">
+          <div class="fullyst-sample">🍑</div>
+          <div class="fullyst-body">
+            <h4>Peachy</h4>
+            <p>22 stickers · Static · <span class="adult-badge">18+</span></p>
+          </div>
+          <span style="color:var(--text4)">›</span>
+        </div>
+        <div class="fullyst-card">
+          <div class="fullyst-sample">👾</div>
+          <div class="fullyst-body">
+            <h4>Pixel Art Gang</h4>
+            <p>15 stickers · Static</p>
+          </div>
+          <span style="color:var(--text4)">›</span>
+        </div>
+        <div class="fullyst-card">
+          <div class="fullyst-sample">🧸</div>
+          <div class="fullyst-body">
+            <h4>TeddyMood</h4>
+            <p>20 stickers · Animated</p>
+          </div>
+          <span style="color:var(--text4)">›</span>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:center;gap:12px;padding:16px 0">
+          <button class="btn btn-outline btn-sm" style="width:auto" disabled>← Prev</button>
+          <span style="font-size:12px;color:var(--text3)">Page 1 of 12</span>
+          <button class="btn btn-outline btn-sm" style="width:auto">Next →</button>
+        </div>
+      </div>
+    </div>
+
+    <nav class="bottom-nav">
+      <button class="nav-item" onclick="switchTab(this,'screenHome')"><span class="nav-icon">🏠</span>Home</button>
+      <button class="nav-item active"><span class="nav-icon">🔍</span>Browse</button>
+      <button class="nav-item" onclick="switchTab(this,'screenSaved')"><span class="nav-icon">💾</span>Saved<span class="badge">12</span></button>
+      <button class="nav-item" onclick="switchTab(this,'screenSettings')"><span class="nav-icon">⚙️</span>Settings</button>
+    </nav>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- SCREEN 7: SAVED COLLECTION                  -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="screen" id="screenSaved">
+    <div class="app-bar">
+      <h1>My saved stickers</h1>
+      <button class="bar-action" id="savedSelectBtn" title="Select" onclick="toggleSavedSelect()">☑️</button>
+    </div>
+    <div class="screen-scroll scroll-bottom">
+      <div class="content-pad">
+        <p style="font-size:12px;color:var(--text3);margin-bottom:14px">
+          Save stickers from any pack and mix them into your own WhatsApp pack.
+        </p>
+
+        <div class="chip-row" style="margin-top:0">
+          <span class="chip active">All (12)</span>
+          <span class="chip">From CuteCats (4)</span>
+          <span class="chip">From DuckWorld (5)</span>
+          <span class="chip">From Cheems (3)</span>
+        </div>
+
+        <div class="sticker-grid" id="savedGrid">
+          <!-- filled by JS -->
+        </div>
+      </div>
+
+      <!-- Create pack bar -->
+      <div style="padding:16px;background:var(--surface);border-top:1px solid var(--border);margin-top:16px">
+        <div class="input-group" style="margin-bottom:10px">
+          <label>Pack name</label>
+          <input class="text-input" value="My sticker mix" placeholder="Name your WhatsApp pack">
+        </div>
+        <button class="btn btn-primary" onclick="showSnackbar('🎉 Pack created! Tap Add to WhatsApp.')">
+          <span>✨</span> Create pack from saved (12)
+        </button>
+        <p style="font-size:11px;color:var(--text4);text-align:center;margin-top:8px">Min 3 stickers of one type. Static & animated are split.</p>
+      </div>
+    </div>
+
+    <nav class="bottom-nav">
+      <button class="nav-item" onclick="switchTab(this,'screenHome')"><span class="nav-icon">🏠</span>Home</button>
+      <button class="nav-item" onclick="switchTab(this,'screenBrowse')"><span class="nav-icon">🔍</span>Browse</button>
+      <button class="nav-item active"><span class="nav-icon">💾</span>Saved<span class="badge">12</span></button>
+      <button class="nav-item" onclick="switchTab(this,'screenSettings')"><span class="nav-icon">⚙️</span>Settings</button>
+    </nav>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- SCREEN 8: SETTINGS                          -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="screen" id="screenSettings">
+    <div class="app-bar">
+      <h1>Settings</h1>
+    </div>
+    <div class="screen-scroll scroll-bottom">
+      <div class="content-pad">
+        <div class="card">
+          <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:4px">Account & Token</div>
+          <div class="toggle-row">
+            <div class="toggle-label">
+              <strong>Saved bot token</strong>
+              <small>Encrypted in Android Keystore</small>
+            </div>
+            <button class="btn btn-outline btn-sm" style="width:auto;color:var(--red);border-color:#5a3333">Forget</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:4px">Content</div>
+          <div class="toggle-row" onclick="this.querySelector('.toggle').classList.toggle('on')">
+            <div class="toggle-label">
+              <strong>Show adult previews (18+)</strong>
+              <small>Reveal adult previews instead of blur</small>
+            </div>
+            <button class="toggle"></button>
+          </div>
+          <div class="toggle-row" onclick="this.querySelector('.toggle').classList.toggle('on')">
+            <div class="toggle-label">
+              <strong>Hide adult content</strong>
+              <small>Hide adult-marked catalog results</small>
+            </div>
+            <button class="toggle on"></button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:4px">Conversion</div>
+          <div class="toggle-row" onclick="this.querySelector('.toggle').classList.toggle('on')">
+            <div class="toggle-label">
+              <strong>Auto-quality ladder</strong>
+              <small>Let the app choose the best fps/quality combo</small>
+            </div>
+            <button class="toggle on"></button>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-label">
+              <strong>Conversion workers</strong>
+              <small>CPU threads for parallel encoding</small>
+            </div>
+            <span style="font-size:14px;font-weight:700;color:var(--mint)">4</span>
+          </div>
+          <div class="toggle-row" onclick="this.querySelector('.toggle').classList.toggle('on')">
+            <div class="toggle-label">
+              <strong>Keep conversion cache</strong>
+              <small>Speed up repeat packs at cost of storage</small>
+            </div>
+            <button class="toggle on"></button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:4px">Storage</div>
+          <div class="toggle-row">
+            <div class="toggle-label">
+              <strong>Cache size</strong>
+              <small>Downloaded & converted stickers cache</small>
+            </div>
+            <span style="font-size:13px;color:var(--text2)">48.3 MB</span>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-label">
+              <strong>Saved stickers</strong>
+              <small>12 stickers in your collection</small>
+            </div>
+            <span style="font-size:13px;color:var(--text2)">2.1 MB</span>
+          </div>
+          <div style="padding-top:10px">
+            <button class="btn btn-outline btn-sm" style="color:var(--red);border-color:#5a3333">Clear all cache</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="font-size:13px;font-weight:700;color:var(--text2);margin-bottom:4px">About</div>
+          <div class="toggle-row">
+            <div class="toggle-label">
+              <strong>Sticker Studio</strong>
+              <small>Version 1.0.0 · Telegram → WhatsApp</small>
+            </div>
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-label">
+              <strong>Open source</strong>
+              <small>MIT License · github.com/you/sticker-studio</small>
+            </div>
+            <span style="color:var(--text4)">›</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <nav class="bottom-nav">
+      <button class="nav-item" onclick="switchTab(this,'screenHome')"><span class="nav-icon">🏠</span>Home</button>
+      <button class="nav-item" onclick="switchTab(this,'screenBrowse')"><span class="nav-icon">🔍</span>Browse</button>
+      <button class="nav-item" onclick="switchTab(this,'screenSaved')"><span class="nav-icon">💾</span>Saved<span class="badge">12</span></button>
+      <button class="nav-item active"><span class="nav-icon">⚙️</span>Settings</button>
+    </nav>
+  </div>
+
+  <!-- ════════════════════════════════════════════ -->
+  <!-- SCREEN 9: STICKER PREVIEW MODAL             -->
+  <!-- ════════════════════════════════════════════ -->
+  <div class="sheet-overlay" id="previewSheet">
+    <div class="sheet" style="max-height:60%">
+      <div class="sheet-handle"></div>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:14px;padding:8px 0 20px">
+        <div style="width:200px;height:200px;border-radius:16px;background:var(--surface2);display:grid;place-items:center">
+          <span id="previewEmoji" style="font-size:120px">😺</span>
+        </div>
+        <div style="text-align:center">
+          <h2 id="previewTitle">Sticker #1</h2>
+          <p style="color:var(--text3);font-size:12px">Animated · TGS · 32.1 KB · 😺 🐱</p>
+        </div>
+        <div style="display:flex;gap:8px;width:100%">
+          <button class="btn btn-secondary btn-sm" style="flex:1" onclick="showSnackbar('💾 Saved to collection!');closePreview()">
+            <span>💾</span> Save for later
+          </button>
+          <button class="btn btn-outline btn-sm" style="flex:0;width:44px" onclick="closePreview()">✕</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Snackbar -->
+  <div class="snackbar" id="snackbar">
+    <span id="snackText">Action completed</span>
+    <button class="snack-action" onclick="hideSnackbar()">DISMISS</button>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- NAV BAR at the side - screen map               -->
+<!-- ═══════════════════════════════════════════════ -->
+<div style="position:fixed;left:20px;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:6px;z-index:200">
+  <div style="font-size:11px;font-weight:800;color:#555;margin-bottom:4px;text-transform:uppercase;letter-spacing:.1em">Screens</div>
+  <button onclick="goTo('screenHome')" class="screen-nav-btn" data-screen="screenHome">🏠 Home</button>
+  <button onclick="goTo('screenFetching')" class="screen-nav-btn" data-screen="screenFetching">⏳ Fetching</button>
+  <button onclick="goTo('screenSelect')" class="screen-nav-btn" data-screen="screenSelect">☑️ Selection</button>
+  <button onclick="goTo('screenConverting')" class="screen-nav-btn" data-screen="screenConverting">⚡ Converting</button>
+  <button onclick="goTo('screenResult')" class="screen-nav-btn" data-screen="screenResult">✅ Result</button>
+  <button onclick="goTo('screenBrowse')" class="screen-nav-btn" data-screen="screenBrowse">🔍 Browse</button>
+  <button onclick="goTo('screenSaved')" class="screen-nav-btn" data-screen="screenSaved">💾 Saved</button>
+  <button onclick="goTo('screenSettings')" class="screen-nav-btn" data-screen="screenSettings">⚙️ Settings</button>
+  <div style="font-size:10px;color:#444;margin-top:8px;max-width:110px;line-height:1.4">Click any screen or navigate inside the phone</div>
+</div>
+<style>
+.screen-nav-btn{
+  padding:7px 12px;border-radius:8px;border:1px solid #333;background:#1a1d21;
+  color:#aab;font-size:12px;font-weight:600;cursor:pointer;text-align:left;
+  transition:.15s;white-space:nowrap;
+}
+.screen-nav-btn:hover{background:#262b31;border-color:#555}
+.screen-nav-btn.active-nav{background:#1a3a2e;border-color:#3b8a6c;color:#7ddcb5}
+@media(max-width:700px){
+  .screen-nav-btn,.screen-nav-btn+div,[data-screen]{display:none!important}
+  div:has(> .screen-nav-btn){display:none!important}
+}
+</style>
+
+<script>
+// ─── Sticker data ───
+const EMOJIS = ['😺','🐱','😸','😻','😽','🙀','😿','😾','🐈','🐈‍⬛','🐾','🐟','🧶','🧸','🪺','🥛','🐭','🐁','🐀','🐹','🐰','🐇','🐿️','🦔','🦇','🐝'];
+const TYPES  = ['static','static','animated','animated','animated','static','animated','static','animated','static','animated','animated','static','static','animated','animated','animated','static','static','animated','static','animated','animated','static','animated','static'];
+const SELECTED_DEFAULT = new Set([2,3,4,6,8,10,11,14]);
+
+const SAVED_EMOJIS = ['😺','🐱','🦆','🐤','🦆','🐸','🦆','🐶','😻','🐾','🐶','🐈'];
+
+// ─── Build grids ───
+function buildStickerGrid(){
+  const grid = document.getElementById('stickerGrid');
+  grid.innerHTML = '';
+  EMOJIS.forEach((emoji, i) => {
+    const sel = SELECTED_DEFAULT.has(i);
+    const cell = document.createElement('div');
+    cell.className = 'sticker-cell' + (sel ? ' selected' : '');
+    cell.innerHTML = `
+      <div class="check">${sel ? '✓' : ''}</div>
+      <span class="sticker-emoji">${emoji}</span>
+      <span class="sticker-tag">${TYPES[i]}</span>
+      <button class="sticker-save" onclick="event.stopPropagation();this.classList.toggle('saved');showSnackbar(this.classList.contains('saved')?'💾 Saved!':'Removed')">♡</button>
+    `;
+    cell.addEventListener('click', () => {
+      cell.classList.toggle('selected');
+      const check = cell.querySelector('.check');
+      check.textContent = cell.classList.contains('selected') ? '✓' : '';
+      updateSelectedCount();
+    });
+    cell.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      openPreview(emoji, i);
+    });
+    // Long press
+    let timer;
+    cell.addEventListener('pointerdown', () => { timer = setTimeout(() => openPreview(emoji, i), 500); });
+    cell.addEventListener('pointerup', () => clearTimeout(timer));
+    cell.addEventListener('pointerleave', () => clearTimeout(timer));
+    grid.appendChild(cell);
+  });
+}
+
+function buildSavedGrid(){
+  const grid = document.getElementById('savedGrid');
+  grid.innerHTML = '';
+  SAVED_EMOJIS.forEach((emoji, i) => {
+    const cell = document.createElement('div');
+    cell.className = 'sticker-cell';
+    cell.innerHTML = `
+      <div class="check"></div>
+      <span class="sticker-emoji">${emoji}</span>
+      <span class="sticker-tag">${i % 3 === 0 ? 'animated' : 'static'}</span>
+    `;
+    cell.addEventListener('click', () => {
+      cell.classList.toggle('selected');
+      cell.querySelector('.check').textContent = cell.classList.contains('selected') ? '✓' : '';
+    });
+    grid.appendChild(cell);
+  });
+}
+
+function updateSelectedCount(){
+  const count = document.querySelectorAll('#stickerGrid .sticker-cell.selected').length;
+  document.getElementById('selectedCount').textContent = count + ' selected';
+}
+
+function toggleSelectAll(){
+  const cells = document.querySelectorAll('#stickerGrid .sticker-cell');
+  const allSelected = [...cells].every(c => c.classList.contains('selected'));
+  cells.forEach(c => {
+    if(allSelected) c.classList.remove('selected');
+    else c.classList.add('selected');
+    c.querySelector('.check').textContent = allSelected ? '' : '✓';
+  });
+  updateSelectedCount();
+}
+
+function filterChip(el){
+  el.parentElement.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// ─── Navigation ───
+function goTo(screenId){
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(screenId).classList.add('active');
+  updateNavHighlight(screenId);
+}
+
+function switchTab(btn, screenId){
+  goTo(screenId);
+}
+
+function updateNavHighlight(screenId){
+  document.querySelectorAll('.screen-nav-btn').forEach(b => {
+    b.classList.toggle('active-nav', b.dataset.screen === screenId);
+  });
+}
+
+// ─── Preview ───
+function openPreview(emoji, index){
+  document.getElementById('previewEmoji').textContent = emoji;
+  document.getElementById('previewTitle').textContent = 'Sticker #' + (index + 1);
+  document.getElementById('previewSheet').classList.add('show');
+}
+function closePreview(){
+  document.getElementById('previewSheet').classList.remove('show');
+}
+document.getElementById('previewSheet').addEventListener('click', function(e){
+  if(e.target === this || e.target.classList.contains('sheet-overlay'))closePreview();
+});
+
+// ─── Snackbar ───
+let snackTimer;
+function showSnackbar(text){
+  clearTimeout(snackTimer);
+  document.getElementById('snackText').textContent = text;
+  document.getElementById('snackbar').classList.add('show');
+  snackTimer = setTimeout(hideSnackbar, 3000);
+}
+function hideSnackbar(){
+  document.getElementById('snackbar').classList.remove('show');
+}
+
+// ─── Init ───
+buildStickerGrid();
+buildSavedGrid();
+updateNavHighlight('screenHome');
+</script>
+</body>
+</html>
