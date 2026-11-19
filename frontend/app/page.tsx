@@ -311,10 +311,16 @@ export default function Home() {
       showToast('Please enter a Telegram pack link.', 'error');
       return;
     }
+    // One active job per browser: if one is running, follow it instead of failing
+    if (fetching || converting) {
+      if (await followRunningJob()) return;
+    }
+
     setSavedToken(botToken, rememberToken);
     setFetching(true);
     setStickers([]);
     setPacks([]);
+    setCurrentJobId(null);
     setJobState({
       phase: 'Connecting',
       message: 'Contacting Telegram API…',
@@ -327,6 +333,7 @@ export default function Home() {
       setCurrentJobId(res.id);
       startPolling(res.id);
     } catch (err: any) {
+      if (err?.status === 409 && (await followRunningJob())) return;
       setFetching(false);
       if (err.status === 409) {
         showToast('A job is already running. Please wait for it to finish.', 'warn');
@@ -391,15 +398,53 @@ export default function Home() {
     });
   }, []);
 
+  // Attach the pack dialog to the job already running in this browser.
+  // webapp.py behaviour: one active job — a second request FOLLOWS it instead
+  // of failing with 409 (which flipped the dialog to a red error card with no
+  // activity log, e.g. when the user closes the dialog and opens another pack
+  // while the previous import/conversion is still running).
+  const followRunningJob = useCallback(async () => {
+    try {
+      const latest = await api.getLatest();
+      if (!latest.id) return false;
+      setCurrentJobId(latest.id);
+      setPackModalTitle('Current job');
+      setPackModalOpen(true);
+      setFetching(true);
+      setStickers([]);
+      setPacks([]);
+      setJobState({
+        phase: 'Working',
+        message: 'A job is already running in this browser — following its progress…',
+        done: 0,
+        total: 0,
+      });
+      startPolling(latest.id);
+      showToast('A job is already running — the dialog will follow it.', 'info');
+      return true;
+    } catch {
+      return false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Fullyst Catalog → View Pack ──
   // Opens PackModal dialog OVER the catalog (does NOT navigate away, matching webapp.py)
   const handleImportFullyst = async (slug: string, title?: string, isAdult?: boolean) => {
+    // If a job is already running in this browser, the backend refuses a second
+    // one (409); follow it instead of breaking the dialog.
+    if (fetching || converting) {
+      if (await followRunningJob()) return;
+    }
+
     setPackModalTitle(title || slug);
     setPackModalAdult(Boolean(isAdult));
     setPackModalOpen(true);
     setFetching(true);
     setStickers([]);
     setPacks([]);
+    setPackTitle(title || slug);
+    setCurrentJobId(null);
     setJobState({
       phase: 'Starting',
       message: `Importing ${title || slug} from Fullyst catalog…`,
@@ -415,6 +460,10 @@ export default function Home() {
       setCurrentJobId(res.id);
       startPolling(res.id);
     } catch (err: any) {
+      // 409 (started from another tab/session): follow the running job instead of
+      // showing a dead error card in the dialog.
+      if (err?.status === 409 && (await followRunningJob())) return;
+
       setFetching(false);
       // Surface the failure inside the open pack modal (matching webapp.py setPackModalStatus)
       setJobState({

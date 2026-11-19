@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Check, Eye, Layers, Sparkles, Star, EyeOff } from 'lucide-react';
+import { Check, Eye, Layers, Sparkles } from 'lucide-react';
 import { Sticker } from '../lib/types';
 import { api } from '../lib/api';
 
@@ -56,6 +56,28 @@ export function StickerGrid({
   const [savedIndices, setSavedIndices] = useState<Set<number>>(new Set());
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
   const gridRef = useRef<HTMLDivElement>(null);
+  // Press & hold (480 ms) a thumbnail to preview it — mirrors webapp.py's attachHoldPreview
+  const longPressTimerRef = useRef<number | null>(null);
+  const holdTriggeredRef = useRef(false);
+
+  const clearLongPress = () => {
+    if (longPressTimerRef.current !== null) {
+      window.clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
+  const startLongPress = (sticker: Sticker) => {
+    clearLongPress();
+    holdTriggeredRef.current = false;
+    longPressTimerRef.current = window.setTimeout(() => {
+      longPressTimerRef.current = null;
+      holdTriggeredRef.current = true;
+      onPreview(sticker);
+    }, 480);
+  };
+
+  useEffect(() => clearLongPress, []);
 
   // CRITICAL FIX FOR "hover auto select stickers":
   // Only select all stickers when a NEW jobId is loaded, NOT on every 700ms polling tick!
@@ -352,6 +374,11 @@ export function StickerGrid({
                 // Ignore clicks originating from inside buttons
                 const target = e.target as HTMLElement;
                 if (target.closest('button')) return;
+                // Swallow the click that follows a long-press preview
+                if (holdTriggeredRef.current) {
+                  holdTriggeredRef.current = false;
+                  return;
+                }
                 toggleSelect(sticker.index, e.shiftKey);
               }}
               className={`relative p-2 rounded-xl border flex flex-col items-center gap-1.5 cursor-pointer transition select-none group focus:outline-none focus:ring-2 focus:ring-mint ${
@@ -369,40 +396,20 @@ export function StickerGrid({
                 {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
               </div>
 
-              {/* Action buttons (top right): Star / Save and Preview */}
-              <div className="absolute top-1.5 right-1.5 flex items-center gap-1 z-10">
-                {onSaveFavorite && (
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleSave(sticker);
-                    }}
-                    className={`p-1 rounded-md transition ${
-                      isSaved
-                        ? 'bg-mint/20 text-mint'
-                        : 'bg-[#0a0e10]/80 text-muted hover:text-mint hover:bg-panel-elevated'
-                    }`}
-                    title={isSaved ? 'Saved to Favorites' : 'Save to Favorites'}
-                  >
-                    <Star className={`w-3.5 h-3.5 ${isSaved ? 'fill-mint' : ''}`} />
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onPreview(sticker);
-                  }}
-                  className="p-1 rounded-md bg-[#0a0e10]/80 text-muted hover:text-white hover:bg-panel-elevated transition"
-                  title="Enlarge Preview"
-                >
-                  <Eye className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {/* Thumbnail with Checkerboard & Animated Preview — full card width, square, object-contain (matches webapp.py) */}
-              <div className="w-full aspect-square rounded-lg sticker-checkerboard flex items-center justify-center p-1.5 mt-5 overflow-hidden">
+              {/* Thumbnail with checkerboard — press & hold to preview (webapp.py
+                  attachHoldPreview); a "View" pill appears on hover (desktop). */}
+              <div
+                className="relative w-full aspect-square rounded-lg sticker-checkerboard flex items-center justify-center p-1.5 mt-5 overflow-hidden select-none touch-pan-y"
+                onPointerDown={() => startLongPress(sticker)}
+                onPointerUp={clearLongPress}
+                onPointerLeave={clearLongPress}
+                onPointerCancel={clearLongPress}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  clearLongPress();
+                  onPreview(sticker);
+                }}
+              >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={initialSrc}
@@ -419,19 +426,52 @@ export function StickerGrid({
                   loading="lazy"
                   draggable={false}
                 />
+                {/* Hover quick-view (desktop). On touch devices, press & hold the thumbnail. */}
+                <button
+                  type="button"
+                  aria-label={`View sticker ${sticker.sourceIndex}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onPreview(sticker);
+                  }}
+                  className="absolute inset-0 flex items-center justify-center bg-black/0 opacity-0 hover:bg-black/40 transition focus:opacity-100 group-hover:opacity-100"
+                >
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-black/75 text-[11px] font-bold text-white pointer-events-none">
+                    <Eye className="w-3.5 h-3.5" /> View
+                  </span>
+                </button>
               </div>
 
-              {/* Meta */}
-              <div className="w-full flex items-center justify-between text-[11px] px-0.5">
-                <span
-                  className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase ${
-                    sticker.kind === 'Animated' ? 'bg-mint/20 text-mint' : 'bg-line text-muted'
-                  }`}
-                >
-                  {sticker.formatLabel || sticker.kind}
+              {/* Info — webapp.py .sticker-info: "N. emoji" left, KIND right */}
+              <div className="w-full flex items-center justify-between gap-1 px-0.5 text-[11px]">
+                <span className="font-bold text-[#d7e2de] truncate">
+                  {sticker.sourceIndex}. {sticker.emoji || '📎'}
                 </span>
-                <span className="text-xs">{sticker.emoji || '📎'}</span>
+                <span className="text-[9px] uppercase tracking-wider text-mint font-extrabold whitespace-nowrap">
+                  {sticker.kind}
+                </span>
               </div>
+
+              {/* Format label — webapp.py .sticker-emoji */}
+              <div className="w-full px-0.5 -mt-1 text-[10px] text-muted whitespace-nowrap overflow-hidden text-ellipsis">
+                {sticker.formatLabel || sticker.kind}
+              </div>
+
+              {/* Save for later — webapp.py .save-sticker-btn */}
+              {onSaveFavorite && (
+                <button
+                  type="button"
+                  disabled={isSaved}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSave(sticker);
+                  }}
+                  title={isSaved ? 'Saved to My Favorites' : 'Save to My Favorites'}
+                  className="w-full mt-0.5 rounded-lg border border-[#3d5e50] bg-[#1d2c26] px-2 py-1.5 text-[10px] font-bold text-[#bff1d9] hover:bg-[#273b32] transition disabled:opacity-80 disabled:cursor-default"
+                >
+                  {isSaved ? 'Saved ✓' : 'Save for later'}
+                </button>
+              )}
             </div>
           );
         })}
