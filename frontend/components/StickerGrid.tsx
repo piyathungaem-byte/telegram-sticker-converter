@@ -357,8 +357,11 @@ export function StickerGrid({
           const isAnimated = sticker.kind === 'Animated';
           const thumbUrl = api.getThumbUrl(jobId, sticker.index);
           const previewUrl = api.getPreviewUrl(jobId, sticker.index);
-          // For animated stickers, request the animated GIF from Modal backend; fallback to static PNG thumb
-          const initialSrc = isAnimated ? previewUrl : thumbUrl;
+          // Prefer the inline poster from the job payload (no network round-trip,
+          // immune to backend restarts); falling back to the /thumb URL.
+          const thumbSrc = sticker.thumbData || thumbUrl;
+          // For animated stickers, request the animated GIF from Modal backend; fallback to static poster
+          const initialSrc = isAnimated ? previewUrl : thumbSrc;
           const shouldBlur = Boolean(sticker.isAdult || isAdult) && !showAdultPreviews;
           const isSaved = savedIndices.has(sticker.index);
           const isFocused = focusedIndex === sticker.index || (focusedIndex === null && cardPosition === 0);
@@ -417,9 +420,9 @@ export function StickerGrid({
                   src={initialSrc}
                   alt={`Sticker ${sticker.sourceIndex}`}
                   onError={(e) => {
-                    // If animated GIF preview failed, fall back to PNG thumbnail
-                    if (isAnimated && e.currentTarget.src !== thumbUrl) {
-                      e.currentTarget.src = thumbUrl;
+                    // If animated GIF preview failed, fall back to the static poster
+                    if (e.currentTarget.src !== thumbSrc) {
+                      e.currentTarget.src = thumbSrc;
                     }
                   }}
                   className={`max-w-full max-h-full object-contain transition duration-200 ${

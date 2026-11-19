@@ -227,7 +227,7 @@ export function PackModal({
         {(isRunning || (jobState.activityLog?.length ?? 0) > 0) && jobState.activityLog && (
           <div className="pack-modal-activity">
             <details
-              open={isRunning && jobState.activityLog.length > 0}
+              open
               className="live-log-modal"
             >
               <summary className="live-log-summary">

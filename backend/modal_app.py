@@ -12,6 +12,7 @@ Or test locally with:
 from __future__ import annotations
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -170,6 +171,14 @@ def _copy_public_state(job: dict) -> dict:
     return result
 
 
+def _thumb_data_uri(thumbnail: bytes | None) -> str | None:
+    """Inline a poster thumbnail as a data URI (frontend renders without any
+    extra request, immune to container replacement)."""
+    if not thumbnail:
+        return None
+    return "data:image/png;base64," + base64.b64encode(thumbnail).decode("ascii")
+
+
 def _job_stickers_for_picker(job_id: str, descriptors: list[dict],
                              thumbnails: list[bytes | None], *, preparing: bool = False) -> list[dict]:
     """Public picker metadata; during preparation, each thumbnail becomes available independently."""
@@ -180,11 +189,15 @@ def _job_stickers_for_picker(job_id: str, descriptors: list[dict],
                       "largePreviewUrl": f"/api/job/{job_id}/preview/{desc['index']}"})
         if desc["kind"] == "Animated":
             sticker["previewUrl"] = f"/api/job/{job_id}/preview/{desc['index']}"
+        thumbnail = thumbnails[index] if index < len(thumbnails) else None
+        if thumbnail:
+            # Inline the poster so <img> renders with zero extra requests; the
+            # /thumb/<index> URL stays as a fallback for cache-miss clients.
+            sticker["thumbData"] = _thumb_data_uri(thumbnail)
         if preparing:
             sticker["previewReady"] = False
             sticker["previewAvailable"] = False
         else:
-            thumbnail = thumbnails[index] if index < len(thumbnails) else None
             sticker["previewReady"] = True
             sticker["previewAvailable"] = bool(thumbnail)
         stickers.append(sticker)
@@ -1743,6 +1756,9 @@ def _run_fetch(job_id: str, set_name: str, token: str, remember: bool) -> None:
                     if index < len(job_stickers):
                         job_stickers[index]["previewReady"] = True
                         job_stickers[index]["previewAvailable"] = bool(thumbnail)
+                        thumb_uri = _thumb_data_uri(thumbnail)
+                        if thumb_uri:
+                            job_stickers[index]["thumbData"] = thumb_uri
             reused = f" · {event['cacheHits']} cached" if event["cacheHits"] else ""
             _update(job_id, phase="Preparing previews",
                     message=(f"Preparing sticker previews · {event['done']} of "
@@ -1859,6 +1875,9 @@ def _run_fullyst_fetch(job_id: str, slug: str) -> None:
                     if index < len(job_stickers):
                         job_stickers[index]["previewReady"] = True
                         job_stickers[index]["previewAvailable"] = bool(thumbnail)
+                        thumb_uri = _thumb_data_uri(thumbnail)
+                        if thumb_uri:
+                            job_stickers[index]["thumbData"] = thumb_uri
             reused = f" · {event['cacheHits']} cached" if event["cacheHits"] else ""
             _update(job_id, phase="Preparing previews",
                     message=(f"Preparing sticker previews · {event['done']} of "
